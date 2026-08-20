@@ -8,7 +8,8 @@
   Released under the MIT License.
   https://github.com/hauptem
 
-  Requirements: Any modern browser. 
+  Requirements: Any modern browser. Runs from disk - no server, no
+                installation, no network access, no dependencies.
 
   PURPOSE:
     Offline X.509 certificate inspection, verification, and bundling.
@@ -16,13 +17,21 @@
     imports certificates from DER/PEM/P7B, and produces reports and
     re-bundled exports (CSV, PEM, P7B, single cert).
 
+  LIMITATIONS:
+    - Roots are never implicitly trusted; root fingerprints are shown
+      for manual comparison against published values.
+    - Revocation (CRL/OCSP) is not checked; the tool is offline.
+    - Folder drag-and-drop is not supported; multi-select files.
+
+  USAGE:
+    Open this file in a browser.
   =============================================================================
 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Certificate Report/Bundle Creator</title>
+<title>Certificate Report/Bundle Tool</title>
 <style>
   /* ------------------------------------------------------------------
      Design tokens.
@@ -39,7 +48,19 @@
   }
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:linear-gradient(180deg,#0b0e14 0%,var(--bg) 40%);background-attachment:fixed;color:var(--text);font-family:var(--sans);font-size:14px;padding:24px;min-height:100vh}
-  h1{font-size:17px;font-weight:600;letter-spacing:.03em;margin-bottom:16px}
+  .titlebar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+  h1{font-size:17px;font-weight:600;letter-spacing:.03em}
+  dialog#guide{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.7);padding:0;max-width:975px;width:90vw;max-height:85vh;margin:auto;overflow:hidden}
+  dialog#guide::backdrop{background:rgba(0,0,0,.6)}
+  .guide-h{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;background:#2c3849;border-bottom:1px solid var(--line);position:sticky;top:0}
+  .guide-h b{font-size:13px;letter-spacing:.08em;text-transform:uppercase}
+  .guide-b{padding:6px 22px 20px;overflow-y:auto;max-height:calc(85vh - 50px);font-size:13.5px;line-height:1.55}
+  .guide-b h2{font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin:20px 0 6px;border-bottom:1px solid var(--line);padding-bottom:4px}
+  .guide-b p{margin:7px 0}
+  .guide-b ul{margin:6px 0 6px 22px}
+  .guide-b li{margin:4px 0}
+  .guide-b code{font-family:var(--mono);font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:2px;padding:1px 5px}
+  .guide-b .gk{color:var(--dim)}
 
   /* section panels */
   .panel{border:1px solid var(--line);border-radius:4px;background:var(--panel);margin-bottom:18px;overflow:hidden;box-shadow:0 4px 18px rgba(0,0,0,.7),0 1px 3px rgba(0,0,0,.5)}
@@ -58,13 +79,6 @@
   .field label .opt{text-transform:none;letter-spacing:0;color:#7a8698;font-size:10px}
   .field input,.field select{background:var(--panel2);box-shadow:inset 0 2px 6px rgba(0,0,0,.6);border:1px solid var(--line);border-radius:3px;color:var(--text);padding:6px 9px;font-family:var(--sans);font-size:13px;min-width:130px}
   .field input:focus,.field select:focus{outline:1px solid var(--accent);outline-offset:1px}
-  .combo{display:flex;align-items:stretch}
-  .combo input{border-top-right-radius:0;border-bottom-right-radius:0;min-width:110px}
-  .combo .arrow{background:#445876;border:1px solid var(--line);border-left:none;border-top-right-radius:3px;border-bottom-right-radius:3px;color:var(--dim);cursor:pointer;padding:0 8px;font-size:10px}
-  .combo .arrow:hover{color:var(--text);border-color:var(--accent)}
-  #catMenu{position:absolute;z-index:10;background:#37485f;border:1px solid #6880a6;border-radius:3px;min-width:130px;box-shadow:0 6px 18px rgba(0,0,0,.45);display:none}
-  #catMenu div{padding:7px 12px;cursor:pointer;font-size:13px;font-family:var(--sans)}
-  #catMenu div:hover{background:#475b7c}
 
   .dropzone{border:1px dashed #64779e;border-radius:3px;background:var(--panel2);box-shadow:inset 0 4px 12px rgba(0,0,0,.65);padding:22px 20px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s,color .15s;color:var(--dim)}
   .dropzone:hover{border-color:var(--accent);color:var(--text)}
@@ -79,10 +93,15 @@
   #search{background:var(--panel2);box-shadow:inset 0 2px 6px rgba(0,0,0,.6);border:1px solid var(--line);border-radius:3px;color:var(--text);padding:5px 9px;font-family:var(--sans);font-size:12.5px;font-weight:400;text-transform:none;letter-spacing:0;width:200px}
   #search:focus{outline:1px solid var(--accent);outline-offset:1px}
   .spacer{flex:1}
-  button{background:#445876;border:1px solid #60779c;color:var(--text);border-radius:3px;padding:6px 13px;font-size:12.5px;cursor:pointer;font-family:var(--sans);text-transform:none;letter-spacing:0;font-weight:400;box-shadow:0 1px 3px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08)}
-  button:hover{border-color:var(--accent)}
+  button{background:#445876;border:1px solid #60779c;color:var(--text);border-radius:3px;padding:6px 13px;font-size:12.5px;cursor:pointer;font-family:var(--sans);text-transform:none;letter-spacing:0;font-weight:400;box-shadow:0 1px 3px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08);transition:background .12s,border-color .12s,box-shadow .12s,transform .12s}
+  button:hover:not(:disabled){background:#4d6384;border-color:#7590b8;box-shadow:0 2px 5px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.12);transform:translateY(-1px)}
+  button:active:not(:disabled){transform:translateY(0);box-shadow:0 1px 2px rgba(0,0,0,.5),inset 0 1px 2px rgba(0,0,0,.25)}
   button.primary{background:#35598f;border-color:#5580bd}
+  button.primary:hover:not(:disabled){background:#3d66a4;border-color:#6b96d9}
   button.export{background:#2d6642;border-color:#478a63}
+  button.guide{background:#e8a820;border-color:#ffc84a;color:#14181f;font-weight:600}
+  button.guide:hover:not(:disabled){background:#f6b82e;border-color:#ffd670}
+  button.export:hover:not(:disabled){background:#34754d;border-color:#52996f}
   button:disabled{opacity:.4;cursor:default}
   button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
@@ -128,10 +147,13 @@
 </head>
 <body>
 
-<h1>CERTIFICATE REPORT/BUNDLE CREATOR</h1>
+<div class="titlebar">
+  <h1>CERTIFICATE REPORT/BUNDLE TOOL</h1>
+  <button id="guideBtn" class="guide" title="User guide">User Guide</button>
+</div>
 
 <details class="panel" open>
-  <summary class="panel-h"><span class="step">1</span> Verify bundle <span class="panel-sub">optional - checks signature and file hashes</span><span class="spacer"></span><button id="vclear" type="button">Clear</button></summary>
+  <summary class="panel-h"><span class="step">1</span> Verify bundle <span class="panel-sub">optional - checks signature and file hashes</span><span class="spacer"></span><button id="vclear" type="button" title="Reset for another bundle">Clear</button></summary>
   <div class="panel-b">
     <div id="vdrop" class="dropzone" role="button" tabindex="0" aria-label="Drop verification files">
       Drop the bundle's .sha256 file, the CA chain .pem, and the bundle files &mdash; or click to browse
@@ -147,10 +169,7 @@
     <div class="batch">
       <div class="field">
         <label for="bCat">Category <span class="opt">optional</span></label>
-        <div class="combo">
-          <input id="bCat" type="text" placeholder="e.g. Internal" size="10" autocomplete="off">
-          <button type="button" class="arrow" data-for="bCat" aria-label="Choose preset category">&#9662;</button>
-        </div>
+        <input id="bCat" type="text" placeholder="e.g. Internal" size="10" autocomplete="off">
       </div>
       <div class="field">
         <label for="bVer">Version <span class="opt">optional</span></label>
@@ -174,10 +193,11 @@
     <input id="search" type="search" placeholder="Search certificates" autocomplete="off">
     <span class="count" id="count">0 certificates</span>
     <span class="spacer"></span>
-    <button id="clear">Clear all</button>
-    <button id="exportPem" class="export" disabled>Export PEM bundle</button>
-    <button id="exportP7b" class="export" disabled>Export P7B bundle</button>
-    <button id="export" class="export" disabled>Export CSV</button>
+    <button id="clear" title="Clear all">Clear all</button>
+    <button id="exportCer" class="export" disabled>Export .cer</button>
+    <button id="exportPem" class="export" disabled title="Export one or more certs in a single PEM file">Export PEM bundle</button>
+    <button id="exportP7b" class="export" disabled title="Export one or more certs in a single P7B file">Export P7B bundle</button>
+    <button id="export" class="export" disabled title="Export table to a .csv file">Export CSV</button>
   </div>
   <div class="tablewrap">
     <table>
@@ -209,7 +229,56 @@
   </div>
 </section>
 
-<div id="catMenu" role="menu"></div>
+<dialog id="guide" aria-labelledby="guideTitle">
+  <div class="guide-h">
+    <b id="guideTitle">User Guide</b>
+    <button id="guideClose" title="Close">Close</button>
+  </div>
+  <div class="guide-b">
+    <p>This tool inspects X.509 certificates, verifies signed bundle releases, and exports certificate bundles.</p>
+
+    <h2>Verify Bundle</h2>
+    <p>Use this section to check a signed release before trusting it. Drop the signature file, the CA chain file if one was provided, and the bundle files. The tool verifies the signature on the manifest, validates the signer's certificate chain, and compares each file's hash against the signed manifest. Both hash values are displayed for each file.</p>
+    <p>The chain is verified up to a self-signed root. Because the root arrives in the same download, the tool displays its fingerprint rather than trusting it. Compare the fingerprint against the value published by the issuing authority.</p>
+    <p>Red results indicate the bundle cannot be trusted: an invalid signature, altered content, a broken chain, or a file hash mismatch. Amber results indicate a correctable problem, such as a missing chain file.</p>
+    <p>A file that was renamed after download is matched to its manifest entry by content hash and reported accordingly. For detached signatures, include the manifest file in the drop.</p>
+    <p>Recognized signature extensions are <code>.sha256</code>, <code>.sha384</code>, <code>.sha512</code>, <code>.p7s</code>, <code>.p7m</code>, and <code>.sig</code>. Manifests must be in sha256sum, sha384sum, or sha512sum format. Supported signature algorithms are RSA PKCS#1 v1.5, RSA-PSS, and ECDSA on P-256, P-384, and P-521.</p>
+
+    <h2>Import Certificates</h2>
+    <p>Drop certificate files to add them to the report. Supported formats are DER, PEM, headerless Base64, and PKCS#7 bundles. Bundles expand to one row per certificate, and each row is named by the certificate's subject CN. Files that fail to parse are listed above the table without affecting the rest of the drop.</p>
+    <p>The Category, Version, and Release Date fields are optional and populate the corresponding report columns for each drop. When Category or Version is blank, filenames following the <code>certificates_pkcs7_v5_14_dod</code> convention fill them automatically; values you type take precedence.</p>
+
+    <h2>Report</h2>
+    <p>Each certificate appears as one row showing its subject, issuer, validity dates, serial number, key and signature algorithms, SHA-1 thumbprint, revocation URLs, and certificate type. Expired certificates are flagged in red. Click the Certificate Name or Expiration header to sort.</p>
+    <p>The search box highlights matching rows across all columns, including serials and thumbprints, without hiding the other rows. Use the checkboxes to select rows for export.</p>
+
+    <h2>Exports</h2>
+    <p>Exports include the selected certificates, or all certificates if none are selected. Duplicate certificates are removed automatically.</p>
+    <ul>
+      <li>Export .cer writes a single certificate as DER, named after the certificate. Available when exactly one certificate is in scope</li>
+      <li>Export PEM bundle writes a concatenated PEM file suitable for use as a CA file</li>
+      <li>Export P7B bundle writes a DER-encoded PKCS#7 bundle</li>
+      <li>Export CSV writes the report table, including SHA-256 thumbprints</li>
+    </ul>
+
+    <h2>Notes</h2>
+    <ul>
+      <li>Revocation status is not checked. OCSP and CRL URLs are reported for use with external tools</li>
+      <li>Windows may block downloaded .cer files. Right-click the file, open Properties, and select Unblock</li>
+    </ul>
+
+    <h2>Troubleshooting</h2>
+    <ul>
+      <li>If a signature file is not recognized, rename it to one of the recognized extensions. The signature covers the file content, so renaming does not affect verification</li>
+      <li>If a detached signature reports that no files match, include the manifest file in the drop</li>
+      <li>If the signer certificate is not found, drop the publisher's chain file. The signature file does not embed the signer's certificate</li>
+      <li>If the chain is incomplete, drop the missing issuer. Certificates from any dropped file are used for chain building</li>
+      <li>A file reported as skipped matches nothing in the manifest by name or content. This is expected for chain files and documentation included in a release</li>
+      <li>Folder drag-and-drop is not supported for pages opened from disk. Select the files directly</li>
+      <li>If fewer rows appear than expected, check the notices above the table for files that failed to parse</li>
+    </ul>
+  </div>
+</dialog>
 
 <script>
 "use strict";
@@ -580,10 +649,13 @@ function extractCertBuffers(buf, filename){
   const blocks = [...text.matchAll(/-----BEGIN (CERTIFICATE|PKCS7|PKCS #7 SIGNED DATA)-----([\s\S]*?)-----END \1-----/g)];
   if (blocks.length){
     const out = [];
+    // A file holding multiple certificates is a bundle: its members are
+    // named by subject CN downstream, the same as PKCS#7 members.
+    const multi = blocks.length > 1;
     blocks.forEach((m, idx)=>{
       const der = b64ToBytes(m[2]);
-      const base = blocks.length>1 ? filename+" ("+(idx+1)+")" : filename;
-      if (m[1] === "CERTIFICATE") out.push({ bytes: der, label: base, fromBundle: false });
+      const base = multi ? filename+" ("+(idx+1)+")" : filename;
+      if (m[1] === "CERTIFICATE") out.push({ bytes: der, label: base, fromBundle: multi });
       else out.push(...certsFromDER(der, base));
     });
     return out;
@@ -1105,8 +1177,9 @@ function render(){
   document.getElementById("exportPem").disabled = !rows.length;
   document.getElementById("exportP7b").disabled = !rows.length;
   const single = (selected.size || rows.length) === 1;
-  document.getElementById("exportPem").textContent = single ? "Export .pem" : "Export PEM bundle";
-  document.getElementById("exportP7b").textContent = single ? "Export .cer" : "Export P7B bundle";
+  const cerBtn = document.getElementById("exportCer");
+  cerBtn.disabled = !single;
+  cerBtn.title = "Export a single certificate";
 }
 
 /* Events */
@@ -1118,46 +1191,6 @@ const errBox = document.getElementById("errors");
    SECTION 6. IMPORT PIPELINE AND CONTROLS
    ====================================================================== */
 
-/* Category presets: dropdown fills the text input; typing anything else is always allowed. */
-const PRESETS = ["Internal","External","Partner","Production","Test"];
-function rememberCategory(cat){
-  if (!cat) return;
-  if (!PRESETS.some(p=>p.toLowerCase()===cat.toLowerCase())) PRESETS.push(cat);
-}
-
-const catMenu = document.getElementById("catMenu");
-let menuTarget = null;
-
-function openCatMenu(arrowBtn, inputEl){
-  menuTarget = inputEl;
-  catMenu.innerHTML = PRESETS.map(p=>'<div role="menuitem">'+esc(p)+'</div>').join("");
-  const r = arrowBtn.getBoundingClientRect();
-  catMenu.style.left = Math.max(8, r.right - 130) + window.scrollX + "px";
-  catMenu.style.top  = (r.bottom + 4 + window.scrollY) + "px";
-  catMenu.style.display = "block";
-}
-function closeCatMenu(){ catMenu.style.display = "none"; menuTarget = null; }
-
-catMenu.addEventListener("click", e=>{
-  if (e.target.role !== "menuitem" && !e.target.matches("div")) return;
-  if (menuTarget){
-    menuTarget.value = e.target.textContent;
-    menuTarget.dispatchEvent(new Event("input",{bubbles:true}));
-  }
-  closeCatMenu();
-});
-document.addEventListener("click", e=>{
-  if (e.target.classList && e.target.classList.contains("arrow")){
-    e.stopPropagation();
-    const combo = e.target.closest(".combo");
-    const input = combo.querySelector("input");
-    if (catMenu.style.display === "block" && menuTarget === input) closeCatMenu();
-    else openCatMenu(e.target, input);
-    return;
-  }
-  if (!catMenu.contains(e.target)) closeCatMenu();
-});
-document.addEventListener("keydown", e=>{ if (e.key === "Escape") closeCatMenu(); });
 
 /**
  * Import a set of files into the report. Each file expands to one or
@@ -1179,10 +1212,9 @@ async function handleFiles(fileList){
       const meta = bundleMeta(f.name);
       const useCat = cat || meta.cat || "";
       const useVer = ver || meta.ver || "";
-      if (!cat && meta.cat) rememberCategory(meta.cat);
       for (const item of extractCertBuffers(buf, f.name)){
         const c = parseCertificate(item.bytes);
-        const name = item.fromBundle ? (c.subjectCN || item.label) : item.label;
+        const name = c.subjectCN || item.label;
         rows.push({ id: nextId++, name, cat: useCat, ver: useVer, rel,
                     org: c.org, issuerCN: c.issuerCN,
                     notBefore: c.notBefore, notAfter: c.notAfter,
@@ -1201,7 +1233,6 @@ async function handleFiles(fileList){
     errBox.style.display = "block";
     errBox.innerHTML = errs.map(e=>'<div class="err">\u26A0 '+esc(e)+'</div>').join("");
   }
-  rememberCategory(cat);
   render();
 }
 
@@ -1398,16 +1429,18 @@ function derConcat(arrs){
   return out;
 }
 
+document.getElementById("exportCer").addEventListener("click", ()=>{
+  const { certs } = uniqueCerts();
+  if (certs.length !== 1) return;
+  const r = certs[0];
+  const fname = certFileBase(r)+".cer";
+  downloadBlob(r.raw, "application/pkix-cert", fname);
+  exportNotice("Certificate exported: "+fname);
+});
+
 document.getElementById("exportP7b").addEventListener("click", ()=>{
   const uc = uniqueCerts();
   const { certs, duplicates } = uc;
-  if (certs.length === 1){
-    const r = certs[0];
-    const fname = certFileBase(r)+".cer";
-    downloadBlob(r.raw, "application/pkix-cert", fname);
-    exportNotice("Certificate exported: "+fname);
-    return;
-  }
   const version    = new Uint8Array([0x02,0x01,0x01]);                                     // INTEGER 1
   const digestAlgs = new Uint8Array([0x31,0x00]);                                          // SET {}
   const contentInf = new Uint8Array([0x30,0x0B,0x06,0x09,0x2A,0x86,0x48,0x86,0xF7,0x0D,0x01,0x07,0x01]); // SEQ{ OID pkcs7-data }
@@ -1620,6 +1653,17 @@ vclear.addEventListener("click", e=>{
 });
 
 render();
+
+/* User guide dialog: open from the title bar, close via button, Escape
+   (native dialog behavior), or clicking the backdrop. */
+const guideDlg = document.getElementById("guide");
+document.getElementById("guideBtn").addEventListener("click", ()=>{
+  if (guideDlg.showModal) guideDlg.showModal(); else guideDlg.setAttribute("open","");
+});
+document.getElementById("guideClose").addEventListener("click", ()=>{
+  if (guideDlg.close) guideDlg.close(); else guideDlg.removeAttribute("open");
+});
+guideDlg.addEventListener("click", e=>{ if (e.target === guideDlg) guideDlg.close(); });
 </script>
 </body>
 </html>

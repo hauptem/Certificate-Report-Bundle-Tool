@@ -1,9 +1,9 @@
-# Certificate Report/Bundle Tool
+# Certificate Report/Bundle Tool v1.0
 
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Dependencies](https://img.shields.io/badge/dependencies-none-blue)
 
-An HTML file with javascript and css for inspecting, verifying, reporting on, and rebuilding certificate bundles. 
+A single HTML file for inspecting, verifying, and rebuilding certificate bundles. Open it in a browser. Runs offline from disk; nothing leaves the machine.
 
 ### What it does
 
@@ -14,6 +14,7 @@ An HTML file with javascript and css for inspecting, verifying, reporting on, an
 
 ### Limitations
 
+- No revocation checking; the tool is offline. CRL/OCSP URLs are reported for external use
 - Manifests must be sha256sum/sha384sum/sha512sum line format. Signature files are recognized by extension: `.sha256` `.sha384` `.sha512` `.p7s` `.p7m` `.sig`
 - No folder drag-and-drop (browsers block it for file:// pages). Multi-select files instead
 
@@ -25,15 +26,4 @@ An HTML file with javascript and css for inspecting, verifying, reporting on, an
 
 MIT License - see [LICENSE](LICENSE).
 
-## Disclaimer
-
-- This is an independent, community-developed solution.
-
-**Technical Disclaimer**
-
-- This software is provided "AS IS" without warranty of any kind
-- The authors and contributors are not responsible for any damages or issues that may arise from its use
-- Review and understand all code before deploying to production systems
-
-By using this software, you acknowledge that you have read and understood these disclaimers and agree to use this solution at your own risk.
-
+Provided as is, without warranty. Not endorsed by any CA or vendor. The tool verifies signatures and reports facts; trust decisions are yours.
