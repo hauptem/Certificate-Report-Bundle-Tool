@@ -3,7 +3,7 @@
   =============================================================================
   Certificate Report/Bundle Tool
   =============================================================================
-  Version: v1.0 (August 19 2026)
+  Version: v1.0 
   Author: Eric Haupt
   Released under the MIT License.
   https://github.com/hauptem/Certificate-Report-Bundle-Tool
@@ -58,7 +58,8 @@
   #cmpResults .st-changed{color:#8a5a00;font-weight:600}
   #cmpResults .st-extra{color:#8a5a00;font-weight:600;white-space:nowrap}
   #cmpResults .st-both{color:#2e6b45;font-weight:600;white-space:nowrap}
-  #cmpResults td.cell-diff{font-weight:700}
+  #cmpResults td.cell-diff{font-weight:700;color:#c62828}
+  #cmpResults .st-ref{color:#5c6572;font-weight:600;white-space:nowrap}
   #cmpResults tbody tr.row-red td{background:#f7dcdc}
   #cmpResults tbody tr.row-amber td{background:#faf0cd}
   .cmp-zone.zone-red{border-color:#c05050;border-style:solid}
@@ -1867,8 +1868,8 @@ function cmpRender(errs){
   for (const e of missing) trs.push(row("MISSING IN COMPARISON BUNDLE","st-missing",e,"row-red"));
   for (const [refs, comps] of changed){
     const diff = diffFields(refs, comps);
-    for (const e of refs)  trs.push(row("CHANGED","st-changed",e,"row-amber",diff));
-    for (const e of comps) trs.push(row("CHANGED","st-changed",e,"row-amber",diff));
+    for (const e of comps) trs.push(row("CHANGED IN COMPARISON BUNDLE","st-changed",e,"row-amber",diff));
+    for (const e of refs)  trs.push(row("REFERENCE","st-ref",e,""));
   }
   for (const e of extra) trs.push(row("MISSING IN REFERENCE BUNDLE","st-extra",e,"row-amber"));
   if (cmpState.showAll){
