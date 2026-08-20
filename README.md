@@ -26,6 +26,6 @@ A user guide is embedded in the tool, opened from the User Guide button. [USERGU
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+MIT License - see [LICENSE](LICENSE) file for details.
 
 This software is provided as is, without warranty of any kind. It is not endorsed by any certificate authority or vendor. The tool verifies signatures and reports certificate contents; trust decisions remain with the operator.
