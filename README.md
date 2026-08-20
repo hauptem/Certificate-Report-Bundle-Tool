@@ -24,7 +24,7 @@ A single HTML file that inspects X.509 certificates, verifies signed bundle rele
 
 ## Documentation
 
-A user guide is embedded in the tool, opened from the User Guide button. [USERGUIDE.md](USERGUIDE.md) contains the same material.
+A user guide is embedded in the tool, opened from the User Guide button. [USERGUIDE](USERGUIDE.md) contains the same material.
 
 ## License
 
