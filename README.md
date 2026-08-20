@@ -1,7 +1,6 @@
 # Certificate Report/Bundle Tool
 
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Dependencies](https://img.shields.io/badge/dependencies-none-blue)
 
 A single HTML file that inspects X.509 certificates, verifies signed bundle releases, and exports certificate bundles. Open `Certificate Report Bundle Tool.html` in a browser.
 
