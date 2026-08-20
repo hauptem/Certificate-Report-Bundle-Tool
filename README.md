@@ -1,9 +1,9 @@
-# Certificate Report/Bundle Creator v1.0
+# Certificate Report/Bundle Tool
 
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Dependencies](https://img.shields.io/badge/dependencies-none-blue)
 
-A single HTML file for inspecting, verifying, and rebuilding certificate bundles. Open it in a browser. Runs offline from disk; nothing leaves the machine.
+An HTML file with javascript and css for inspecting, verifying, reporting on, and rebuilding certificate bundles. 
 
 ### What it does
 
@@ -14,7 +14,6 @@ A single HTML file for inspecting, verifying, and rebuilding certificate bundles
 
 ### Limitations
 
-- No revocation checking; the tool is offline. CRL/OCSP URLs are reported for external use
 - Manifests must be sha256sum/sha384sum/sha512sum line format. Signature files are recognized by extension: `.sha256` `.sha384` `.sha512` `.p7s` `.p7m` `.sig`
 - No folder drag-and-drop (browsers block it for file:// pages). Multi-select files instead
 
