@@ -28,4 +28,8 @@ A user guide is embedded in the tool, opened from the User Guide button. [USERGU
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
-This software is provided as is, without warranty of any kind. It is not endorsed by any certificate authority or vendor. The tool verifies signatures and reports certificate contents; trust decisions remain with the operator.
+**Technical Disclaimer:**
+- This software is provided "AS IS" without warranty of any kind
+- The authors and contributors are not responsible for any damages or issues that may arise from its use
+
+By using this software, you acknowledge that you have read and understood these disclaimers and agree to use this solution at your own risk.
