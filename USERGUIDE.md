@@ -1,44 +1,53 @@
-# Certificate Report/Bundle Tool User Guide
+# Certificate Report/Bundle Tool - User Guide
 
-Open `Certificate Report Bundle Tool.html` in a browser. Three sections: Verify, Import, Report. They work independently.
+Open `Certificate Report Bundle Tool.html` in a browser. The tool has three sections: Verify Bundle, Import Certificates, and Report. They work independently.
 
-## Verify
+## Verify Bundle
 
-Drop the signature file, the CA chain (if provided), and the bundle files. Any order, multiple drops. Clear resets the panel.
+Use this section to check a signed release before trusting it. Drop the signature file, the CA chain file if one was provided, and the bundle files. The tool verifies the signature on the manifest, validates the signer's certificate chain, and compares each file's hash against the signed manifest. Both hash values are displayed for each file.
 
-Results, in order: signer, signature validity, chain path, root fingerprints, then per-file hash comparison with both values shown. The root fingerprint lines are informational; compare them against the authority's published value to close the loop. A file matched by content under a different name is reported as such; the hash is the binding, not the filename.
+The chain is verified up to a self-signed root. Because the root arrives in the same download, the tool displays its fingerprint rather than trusting it. Compare the fingerprint against the value published by the issuing authority.
 
-Red stops the pipeline: invalid signature, altered content, broken chain link, hash mismatch. Amber is degraded: incomplete chain (drop the chain file) or an expired chain cert.
+Red results indicate the bundle cannot be trusted: an invalid signature, altered content, a broken chain, or a file hash mismatch. Amber results indicate a correctable problem, such as a missing chain file.
 
-Detached signatures work; drop the manifest content file alongside the signature.
+A file that was renamed after download is matched to its manifest entry by content hash and reported accordingly. For detached signatures, include the manifest file in the drop.
 
-## Import
+Recognized signature extensions are `.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, and `.sig`. Manifests must be in sha256sum, sha384sum, or sha512sum format. Supported signature algorithms are RSA PKCS#1 v1.5, RSA-PSS, and ECDSA on P-256, P-384, and P-521.
 
-Set Category, Version, and Release Date, then drop files. The fields label the report rows for that drop; certificates are never modified. Blank Category/Version auto-fill from `certificates_pkcs7_v#_#_group` filenames; typed values win. Parse failures are listed by name without blocking the batch.
+The Clear button resets the panel for another bundle.
 
-.p7b bundles expand to one row per certificate, named by subject CN.
+## Import Certificates
+
+Drop certificate files to add them to the report. Supported formats are DER, PEM, headerless Base64, and PKCS#7 bundles. Bundles expand to one row per certificate, and each row is named by the certificate's subject CN. Files that fail to parse are listed above the table without affecting the rest of the drop.
+
+The Category, Version, and Release Date fields are optional and populate the corresponding report columns for each drop. When Category or Version is blank, filenames following the `certificates_pkcs7_v5_14_dod` convention fill them automatically; values you type take precedence.
 
 ## Report
 
-Columns: Category, Name, Version, Release, Organization, Issuer CN, Not Before, Expiration, Serial, Key, Signature Alg, Thumbprint (SHA-1), OCSP, CRL, Type. Expired rows flag red. Sort by name or expiration.
+Each certificate appears as one row showing its subject, issuer, validity dates, serial number, key and signature algorithms, SHA-1 thumbprint, revocation URLs, and certificate type. Expired certificates are flagged in red. Click the Certificate Name or Expiration header to sort.
 
-Search highlights matching rows without filtering and covers every column. Paste a thumbprint or serial to confirm an exact cert is present.
+The search box highlights matching rows across all columns, including serials and thumbprints, without hiding the other rows. Use the checkboxes to select rows for export.
 
-Checkboxes select rows. Exports cover the selection, or everything when nothing is selected:
+## Exports
 
-- **CSV** - all columns plus SHA-256 thumbprint
-- **PEM bundle** - openssl print_certs style; works directly as a CAfile
-- **P7B bundle** - DER PKCS#7, same structure as `openssl crl2pkcs7`
-- One cert in scope relabels the buttons to **.pem** / **.cer** and exports a single file named after the cert
+Exports include the selected certificates, or all certificates if none are selected. Duplicate certificates are removed automatically.
 
-Byte-identical duplicates across imports are dropped from exports automatically.
+- Export .cer writes a single certificate as DER, named after the certificate. Available when exactly one certificate is in scope
+- Export PEM bundle writes a concatenated PEM file suitable for use as a CA file
+- Export P7B bundle writes a DER-encoded PKCS#7 bundle
+- Export CSV writes the report table, including SHA-256 thumbprints
+
+## Notes
+
+- Revocation status is not checked. OCSP and CRL URLs are reported for use with external tools
+- Windows may block downloaded .cer files. Right-click the file, open Properties, and select Unblock
 
 ## Troubleshooting
 
-- **Signature file ignored** - rename it to a recognized extension (`.sha256` `.p7s` etc.). The signature covers content, not the filename
-- **"Detached signature: none of the provided files match"** - drop the manifest content file. Line-ending changes are handled; altered content is not
-- **"Signer certificate not found"** - the signature does not embed the signer cert. Drop the publisher's chain file
-- **"Chain incomplete"** - drop the missing issuer. Certs in any dropped file join the chain pool
-- **File "skipped (not in manifest)"** - matches no manifest entry by name or content. Normal for chain files and READMEs; suspicious for a bundle file you expected to verify
-- **Folder drop does nothing** - browsers block it for file:// pages. Select the files instead
-- **Fewer rows than expected** - parse failures are listed above the table with reasons
+- If a signature file is not recognized, rename it to one of the recognized extensions. The signature covers the file content, so renaming does not affect verification
+- If a detached signature reports that no files match, include the manifest file in the drop
+- If the signer certificate is not found, drop the publisher's chain file. The signature file does not embed the signer's certificate
+- If the chain is incomplete, drop the missing issuer. Certificates from any dropped file are used for chain building
+- A file reported as skipped matches nothing in the manifest by name or content. This is expected for chain files and documentation included in a release
+- Folder drag-and-drop is not supported for pages opened from disk. Select the files directly
+- If fewer rows appear than expected, check the notices above the table for files that failed to parse
