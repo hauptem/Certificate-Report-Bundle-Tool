@@ -3,7 +3,7 @@
   =============================================================================
   Certificate Report/Bundle Tool
   =============================================================================
-  Version: v1.0 (August 19 2026)
+  Version: v1.0 
   Author: Eric Haupt
   Released under the MIT License.
   https://github.com/hauptem/Certificate-Report-Bundle-Tool
@@ -38,6 +38,31 @@
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:linear-gradient(180deg,#0b0e14 0%,var(--bg) 40%);background-attachment:fixed;color:var(--text);font-family:var(--sans);font-size:14px;padding:24px;min-height:100vh}
   .titlebar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+  .titlebtns{display:flex;gap:10px}
+  dialog#compare{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.7);padding:0;width:96vw;max-width:96vw;max-height:90vh;margin:auto;overflow:hidden}
+  dialog#compare::backdrop{background:rgba(0,0,0,.6)}
+  .cmp-b{padding:14px 22px 20px;overflow-y:auto;max-height:calc(90vh - 50px)}
+  .cmp-zones{display:flex;gap:14px}
+  .cmp-side{flex:1;min-width:0}
+  .cmp-side .zlabel{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+  .cmp-side .zlabel button{padding:2px 9px;font-size:11px;font-weight:400}
+  .cmp-zone{border:2px dashed #3f4c5f;border-radius:3px;background:var(--panel2);padding:18px 10px;text-align:center;color:var(--dim);cursor:pointer;font-size:12.5px}
+  .cmp-zone.drag{border-color:var(--accent);color:var(--accent)}
+  .cmp-zone .zcount{display:block;margin-top:4px;font-family:var(--mono);font-size:12px;color:var(--text)}
+  #cmpResults{margin-top:14px;font-family:var(--mono);font-size:12.5px}
+  #cmpResults .vline{padding:2px 0}
+  #cmpResults .tablewrap{margin-top:10px}
+  #cmpResults table{min-width:1500px}
+  #cmpResults .st-missing{color:#c62828;font-weight:600;white-space:nowrap}
+  #cmpResults .st-changed{color:#8a5a00;font-weight:600}
+  #cmpResults .st-extra{color:#8a5a00;font-weight:600;white-space:nowrap}
+  #cmpResults .st-both{color:#2e6b45;font-weight:600;white-space:nowrap}
+  #cmpResults tbody tr.row-red td{background:#f7dcdc}
+  #cmpResults tbody tr.row-amber td{background:#faf0cd}
+  .cmp-zone.zone-red{border-color:#c05050;border-style:solid}
+  .cmp-zone.zone-red .zcount{color:#e08a8a}
+  .cmp-zone.zone-amber{border-color:#c99a2e;border-style:solid}
+  .cmp-zone.zone-amber .zcount{color:#e0b45a}
   h1{font-size:17px;font-weight:600;letter-spacing:.03em}
   dialog#guide{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.7);padding:0;max-width:975px;width:90vw;max-height:85vh;margin:auto;overflow:hidden}
   dialog#guide::backdrop{background:rgba(0,0,0,.6)}
@@ -135,7 +160,10 @@
 
 <div class="titlebar">
   <h1>CERTIFICATE REPORT/BUNDLE TOOL</h1>
-  <button id="guideBtn" class="guide" title="User guide">User Guide</button>
+  <div class="titlebtns">
+    <button id="compareBtn" title="Compare two bundles">Compare</button>
+    <button id="guideBtn" class="guide" title="User guide">User Guide</button>
+  </div>
 </div>
 
 <details class="panel" open>
@@ -215,6 +243,31 @@
   </div>
 </section>
 
+<dialog id="compare" aria-labelledby="cmpTitle">
+  <div class="guide-h">
+    <b id="cmpTitle">Compare Bundles</b>
+    <div class="titlebtns">
+      <button id="cmpToggle" title="Show every certificate in both sets">Show all</button>
+      <button id="cmpClose" title="Close">Close</button>
+    </div>
+  </div>
+  <div class="cmp-b">
+    <div class="cmp-zones">
+      <div class="cmp-side">
+        <div class="zlabel"><span>Reference</span><button id="cmpClearRef" title="Clear reference side">Clear</button></div>
+        <div class="cmp-zone" id="cmpZoneRef">Drop a bundle or certificates<span class="zcount" id="cmpCountRef">empty</span></div>
+        <input type="file" id="cmpFileRef" multiple hidden>
+      </div>
+      <div class="cmp-side">
+        <div class="zlabel"><span>Comparison</span><button id="cmpClearComp" title="Clear comparison side">Clear</button></div>
+        <div class="cmp-zone" id="cmpZoneComp">Drop a bundle or certificates<span class="zcount" id="cmpCountComp">empty</span></div>
+        <input type="file" id="cmpFileComp" multiple hidden>
+      </div>
+    </div>
+    <div id="cmpResults"></div>
+  </div>
+</dialog>
+
 <dialog id="guide" aria-labelledby="guideTitle">
   <div class="guide-h">
     <b id="guideTitle">User Guide</b>
@@ -230,6 +283,11 @@
     <p>A file that was renamed after download is matched to its manifest entry by content hash and reported accordingly. For detached signatures, include the manifest file in the drop.</p>
     <p>Recognized signature extensions are <code>.sha256</code>, <code>.sha384</code>, <code>.sha512</code>, <code>.p7s</code>, <code>.p7m</code>, and <code>.sig</code>. Manifests must be in sha256sum, sha384sum, or sha512sum format. Supported signature algorithms are RSA PKCS#1 v1.5, RSA-PSS, and ECDSA on P-256, P-384, and P-521.</p>
 
+    <h2>Compare Bundles</h2>
+    <p>The Compare button opens a two-sided comparison. Drop certificates or bundles on the Reference and Comparison sides. Either side accepts the same formats as import, across multiple files. Results appear once both sides hold certificates.</p>
+    <p>Differences are shown as a table with the same fields as the report. A certificate present in the reference but not the comparison is marked MISSING IN COMPARISON BUNDLE in red; the reverse is marked MISSING IN REFERENCE BUNDLE in amber. A certificate with the same subject but different content is marked CHANGED, with one row per version. Matching uses the full subject rather than the common name. The Comparison drop zone is outlined red when entries are missing from it and amber when it only differs.</p>
+    <p>Certificates present in both sets are summarized as a count. The Show all button adds them to the table as IN BOTH rows.</p>
+
     <h2>Import Certificates</h2>
     <p>Drop certificate files to add them to the report. Supported formats are DER, PEM, headerless Base64, and PKCS#7 bundles. Bundles expand to one row per certificate, and each row is named by the certificate's subject CN. Files that fail to parse are listed above the table without affecting the rest of the drop.</p>
     <p>The Category, Version, and Release Date fields are optional and populate the corresponding report columns for each drop. When Category or Version is blank, filenames following the <code>certificates_pkcs7_v5_14_dod</code> convention fill them automatically; values you type take precedence.</p>
@@ -239,7 +297,7 @@
     <p>The search box highlights matching rows across all columns, including serials and thumbprints, without hiding the other rows. Use the checkboxes to select rows for export.</p>
 
     <h2>Exports</h2>
-    <p>Exports include the selected certificates, or all certificates if none are selected. Duplicate certificates are removed automatically.</p>
+    <p>Exports include the selected certificates, or all certificates if none are selected. Duplicate certificates are removed automatically. Each export prompts for the filename, with a default supplied.</p>
     <ul>
       <li>Export .cer writes a single certificate as DER, named after the certificate. Available when exactly one certificate is in scope</li>
       <li>Export PEM bundle writes a concatenated PEM file suitable for use as a CA file</li>
@@ -1067,6 +1125,8 @@ const selected = new Set();
  * from a six-color palette, in first-seen order.
  */
 const chipColors = new Map();
+
+/** CSS class for a category's chip, assigning a palette slot on first use. */
 function chipClass(cat){
   if (!cat) return "chip";
   const k = cat.toLowerCase();
@@ -1658,6 +1718,173 @@ vclear.addEventListener("click", e=>{
 });
 
 render();
+
+/* ======================================================================
+   SECTION 9. BUNDLE COMPARISON
+   Two certificate sets, Reference and Comparison, are diffed once both
+   sides hold certificates:
+     identical - byte-identical certificate present in both sets;
+                 summarized as a count, or listed as IN BOTH rows in
+                 show-all mode
+     changed   - same subject DER, different bytes (a renewed, rekeyed,
+                 or wrong-generation CA); one row per version
+     missing   - present in only one set, reported as MISSING IN
+                 COMPARISON BUNDLE or MISSING IN REFERENCE BUNDLE
+   The Comparison drop zone carries the verdict color: red when entries
+   are missing from it, amber when it only differs, neutral when the
+   sets match. Each side dedupes by content hash, so overlapping input
+   files are harmless. Subject matching uses the full subject DER, not
+   the CN, to avoid cross-organization name collisions.
+   ====================================================================== */
+const cmpState = { ref: new Map(), comp: new Map(), showAll: false };
+
+/**
+ * Intake for one comparison side: expand every dropped file to
+ * certificates and merge them into that side's map, keyed by SHA-256
+ * of the certificate bytes. Parse failures are reported per file in
+ * the results area without discarding the rest.
+ */
+async function cmpHandleFiles(side, fileList){
+  const errs = [];
+  for (const f of fileList){
+    const buf = new Uint8Array(await f.arrayBuffer());
+    try {
+      for (const item of extractCertBuffers(buf, f.name)){
+        const c = parseCertificate(item.bytes);
+        const key = await digestHex("SHA-256", c.raw);
+        if (!cmpState[side].has(key))
+          cmpState[side].set(key, { c, thumb1: await digestHex("SHA-1", c.raw) });
+      }
+    } catch(e){ errs.push(f.name+": "+e.message); }
+  }
+  cmpRender(errs);
+}
+
+/**
+ * Diff the two sides and render the result as a report-style table.
+ * Default mode shows differences only, with identical certificates
+ * summarized in a count line. Show-all mode adds a neutral IN BOTH row
+ * for every identical certificate. Row order: missing, changed (one
+ * row per version), extra, then identical in show-all mode. Runs only
+ * when both sides hold at least one certificate.
+ */
+function cmpRender(errs){
+  const box = document.getElementById("cmpResults");
+  document.getElementById("cmpCountRef").textContent  = cmpState.ref.size  ? cmpState.ref.size+" certificate(s)"  : "empty";
+  document.getElementById("cmpCountComp").textContent = cmpState.comp.size ? cmpState.comp.size+" certificate(s)" : "empty";
+  const parts = [];
+  if (errs && errs.length)
+    for (const e of errs) parts.push('<div class="vline vbad"><span class="mark">\u2717</span> '+esc(e)+'</div>');
+  document.getElementById("cmpZoneComp").classList.remove("zone-red","zone-amber");
+  if (!cmpState.ref.size || !cmpState.comp.size){
+    box.innerHTML = parts.join("");
+    return;
+  }
+  // Pass 1: byte-identical pairs.
+  const refLeft = new Map(cmpState.ref), compLeft = new Map(cmpState.comp);
+  const both = [];
+  for (const key of cmpState.ref.keys()){
+    if (compLeft.has(key)){ both.push(cmpState.ref.get(key)); refLeft.delete(key); compLeft.delete(key); }
+  }
+  const identical = both.length;
+  // Pass 2: group leftovers by subject DER.
+  const bySubject = (m)=>{
+    const g = new Map();
+    for (const [,v] of m){
+      const s = toHex(v.c.subjectBytes);
+      if (!g.has(s)) g.set(s, []);
+      g.get(s).push(v);
+    }
+    return g;
+  };
+  const refSub = bySubject(refLeft), compSub = bySubject(compLeft);
+  const changed = [], missing = [], extra = [];
+  for (const [s, refs] of refSub){
+    if (compSub.has(s)){ changed.push([refs, compSub.get(s)]); compSub.delete(s); }
+    else missing.push(...refs);
+  }
+  for (const comps of compSub.values()) extra.push(...comps);
+  const byCN = (a,b)=>(a.c.subjectCN||"").localeCompare(b.c.subjectCN||"");
+  missing.sort(byCN); extra.sort(byCN);
+  changed.sort((a,b)=>(a[0][0].c.subjectCN||"").localeCompare(b[0][0].c.subjectCN||""));
+
+  parts.push('<div class="vline">'+identical+' certificate(s) identical in both sets</div>');
+  if (!changed.length && !missing.length && !extra.length && !cmpState.showAll){
+    parts.push('<div class="vline vok"><span class="mark">\u2713</span> No differences</div>');
+    box.innerHTML = parts.join("");
+    return;
+  }
+  const row = (status, stClass, e, shade)=>{
+    const c = e.c;
+    return '<tr class="'+shade+'">' +
+      '<td class="'+stClass+'">'+status+'</td>' +
+      '<td>'+esc(c.subjectCN || "(no CN)")+'</td>' +
+      '<td>'+esc(c.org)+'</td>' +
+      '<td>'+esc(c.issuerCN ? "CN = "+c.issuerCN : "")+'</td>' +
+      '<td>'+fmtDate(c.notBefore)+'</td>' +
+      '<td>'+fmtDate(c.notAfter)+'</td>' +
+      '<td class="mono-sm">'+esc(c.serialHex)+'</td>' +
+      '<td>'+esc(keyInfo(c.spkiBytes))+'</td>' +
+      '<td>'+esc(sigAlgName(c.sigAlgOID))+'</td>' +
+      '<td class="mono-sm">'+esc(e.thumb1)+'</td>' +
+      '</tr>';
+  };
+  const trs = [];
+  for (const e of missing) trs.push(row("MISSING IN COMPARISON BUNDLE","st-missing",e,"row-red"));
+  for (const [refs, comps] of changed){
+    for (const e of refs)  trs.push(row("CHANGED","st-changed",e,"row-amber"));
+    for (const e of comps) trs.push(row("CHANGED","st-changed",e,"row-amber"));
+  }
+  for (const e of extra) trs.push(row("MISSING IN REFERENCE BUNDLE","st-extra",e,"row-amber"));
+  if (cmpState.showAll){
+    both.sort(byCN);
+    for (const e of both) trs.push(row("IN BOTH","st-both",e,""));
+  }
+  // The verdict is about the Comparison set, so it carries the color:
+  // red when entries are missing from it, amber when it only differs
+  // (changed or extra). The Reference is the baseline and stays neutral.
+  const zc = document.getElementById("cmpZoneComp").classList;
+  zc.toggle("zone-red", missing.length > 0);
+  zc.toggle("zone-amber", missing.length === 0 && (changed.length > 0 || extra.length > 0));
+  parts.push('<div class="tablewrap"><table><thead><tr>' +
+    '<th>Status</th><th>Certificate Name</th><th>Organization</th>' +
+    '<th>Issuer Common Name</th><th>Not Before</th><th>Expiration</th><th>Serial</th>' +
+    '<th>Key</th><th>Signature Alg</th><th>Thumbprint (SHA-1)</th>' +
+    '</tr></thead><tbody>'+trs.join("")+'</tbody></table></div>');
+  box.innerHTML = parts.join("");
+}
+
+/* Compare dialog wiring: open/close and per-side drop, browse, clear. */
+const cmpDlg = document.getElementById("compare");
+document.getElementById("compareBtn").addEventListener("click", ()=>{
+  if (cmpDlg.showModal) cmpDlg.showModal(); else cmpDlg.setAttribute("open","");
+});
+document.getElementById("cmpToggle").addEventListener("click", ()=>{
+  cmpState.showAll = !cmpState.showAll;
+  const b = document.getElementById("cmpToggle");
+  b.textContent = cmpState.showAll ? "Show differences" : "Show all";
+  b.title = cmpState.showAll ? "Show only the differences" : "Show every certificate in both sets";
+  cmpRender();
+});
+document.getElementById("cmpClose").addEventListener("click", ()=>{
+  if (cmpDlg.close) cmpDlg.close(); else cmpDlg.removeAttribute("open");
+});
+cmpDlg.addEventListener("click", e=>{ if (e.target === cmpDlg) cmpDlg.close(); });
+
+for (const [side, zoneId, fileId, clearId] of [["ref","cmpZoneRef","cmpFileRef","cmpClearRef"],
+                                               ["comp","cmpZoneComp","cmpFileComp","cmpClearComp"]]){
+  const zone = document.getElementById(zoneId);
+  const input = document.getElementById(fileId);
+  zone.addEventListener("click", ()=>input.click());
+  zone.addEventListener("dragover", e=>{ e.preventDefault(); zone.classList.add("drag"); });
+  zone.addEventListener("dragleave", ()=>zone.classList.remove("drag"));
+  zone.addEventListener("drop", e=>{
+    e.preventDefault(); zone.classList.remove("drag");
+    cmpHandleFiles(side, [...e.dataTransfer.files]);
+  });
+  input.addEventListener("change", e=>{ cmpHandleFiles(side, [...e.target.files]); input.value=""; });
+  document.getElementById(clearId).addEventListener("click", ()=>{ cmpState[side].clear(); cmpRender(); });
+}
 
 /* User guide dialog: open from the title bar, close via button, Escape
    (native dialog behavior), or clicking the backdrop. */

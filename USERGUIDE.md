@@ -16,6 +16,14 @@ Recognized signature extensions are `.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p
 
 The Clear button resets the panel for another bundle.
 
+## Compare Bundles
+
+The Compare button opens a two-sided comparison. Drop certificates or bundles on the Reference and Comparison sides. Either side accepts the same formats as import, across multiple files. Results appear once both sides hold certificates.
+
+Differences are shown as a table with the same fields as the report. A certificate present in the reference but not the comparison is marked MISSING IN COMPARISON BUNDLE in red; the reverse is marked MISSING IN REFERENCE BUNDLE in amber. A certificate with the same subject but different content is marked CHANGED, with one row per version. Matching uses the full subject rather than the common name. The Comparison drop zone is outlined red when entries are missing from it and amber when it only differs.
+
+Certificates present in both sets are summarized as a count. The Show all button adds them to the table as IN BOTH rows.
+
 ## Import Certificates
 
 Drop certificate files to add them to the report. Supported formats are DER, PEM, headerless Base64, and PKCS#7 bundles. Bundles expand to one row per certificate, and each row is named by the certificate's subject CN. Files that fail to parse are listed above the table without affecting the rest of the drop.
@@ -30,7 +38,7 @@ The search box highlights matching rows across all columns, including serials an
 
 ## Exports
 
-Exports include the selected certificates, or all certificates if none are selected. Duplicate certificates are removed automatically.
+Exports include the selected certificates, or all certificates if none are selected. Duplicate certificates are removed automatically. Each export prompts for the filename, with a default supplied.
 
 - Export .cer writes a single certificate as DER, named after the certificate. Available when exactly one certificate is in scope
 - Export PEM bundle writes a concatenated PEM file suitable for use as a CA file

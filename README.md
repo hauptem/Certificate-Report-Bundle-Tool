@@ -1,12 +1,14 @@
 # Certificate Report/Bundle Tool
 
-A single HTML file that inspects X.509 certificates, verifies signed bundle releases, and exports certificate bundles. Open `Certificate Report Bundle Tool.html` in a modern browser.
+A single HTML file that inspects X.509 certificates, verifies signed bundle releases, and exports certificate bundles. Open `Certificate Report Bundle Tool.html` in a browser.
 
 <img width="1937" height="918" alt="Image" src="https://github.com/user-attachments/assets/9aa4be28-b68d-4402-907e-db9293e147c1" />
 
 ## Capabilities
 
 **Verify Bundle.** Checks a signed release before you trust it. The tool verifies the signature on the publisher's hash manifest, validates the signer's certificate chain to a self-signed root, and compares each bundle file's hash against the signed manifest. Both hash values are displayed for each file. The root's fingerprint is displayed for comparison against the issuing authority's published value. Attached and detached CMS signatures are supported, with RSA PKCS#1 v1.5, RSA-PSS, and ECDSA (P-256/P-384/P-521). Files renamed after download are matched to their manifest entries by content hash.
+
+**Compare Bundles.** Diffs two certificate sets in a report-style table. Certificates present on only one side are marked missing from the other; same-subject certificates with different content are marked changed, one row per version; identical certificates are summarized as a count or listed with the Show all toggle.
 
 **Import Certificates.** Reads DER, PEM, headerless Base64, and PKCS#7 bundles, detected by content rather than extension. Bundles expand to one row per certificate, named by subject CN. Optional Category, Version, and Release Date fields populate the corresponding report columns for each drop.
 
