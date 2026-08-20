@@ -60,7 +60,6 @@
   .guide-b ul{margin:6px 0 6px 22px}
   .guide-b li{margin:4px 0}
   .guide-b code{font-family:var(--mono);font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:2px;padding:1px 5px}
-  .guide-b .gk{color:var(--dim)}
 
   /* section panels */
   .panel{border:1px solid var(--line);border-radius:4px;background:var(--panel);margin-bottom:18px;overflow:hidden;box-shadow:0 4px 18px rgba(0,0,0,.7),0 1px 3px rgba(0,0,0,.5)}
@@ -96,8 +95,6 @@
   button{background:#445876;border:1px solid #60779c;color:var(--text);border-radius:3px;padding:6px 13px;font-size:12.5px;cursor:pointer;font-family:var(--sans);text-transform:none;letter-spacing:0;font-weight:400;box-shadow:0 1px 3px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08);transition:background .12s,border-color .12s,box-shadow .12s,transform .12s}
   button:hover:not(:disabled){background:#4d6384;border-color:#7590b8;box-shadow:0 2px 5px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.12);transform:translateY(-1px)}
   button:active:not(:disabled){transform:translateY(0);box-shadow:0 1px 2px rgba(0,0,0,.5),inset 0 1px 2px rgba(0,0,0,.25)}
-  button.primary{background:#35598f;border-color:#5580bd}
-  button.primary:hover:not(:disabled){background:#3d66a4;border-color:#6b96d9}
   button.export{background:#2d6642;border-color:#478a63}
   button.guide{background:#e8a820;border-color:#ffc84a;color:#14181f;font-weight:600}
   button.guide:hover:not(:disabled){background:#f6b82e;border-color:#ffd670}
@@ -608,8 +605,9 @@ function b64ToBytes(s){
 /**
  * Expand a DER buffer into one or more certificates.
  * A plain certificate yields itself. A PKCS#7/CMS SignedData
- * (RFC 5652 5.1) yields each member of its certificates [0] set;
- * bundle members are labeled "filename [n]" pending CN resolution.
+ * (RFC 5652 5.1) yields each member of its certificates [0] set,
+ * labeled "filename [n]"; labels serve only as fallback row names for
+ * certificates without a subject CN.
  * @throws {Error} If the buffer is not a SEQUENCE, or is a PKCS#7
  *         structure with no certificate set.
  */
@@ -626,12 +624,12 @@ function certsFromDER(bytes, filename){
     const out = [];
     let n = 1;
     for (const c of children(bytes, certSet)){
-      out.push({ bytes: bytesOf(bytes, c), label: filename+" ["+(n++)+"]", fromBundle: true });
+      out.push({ bytes: bytesOf(bytes, c), label: filename+" ["+(n++)+"]" });
     }
     if (!out.length) throw new Error("PKCS#7: certificate set is empty");
     return out;
   }
-  return [{ bytes, label: filename, fromBundle: false }];
+  return [{ bytes, label: filename }];
 }
 
 /**
@@ -639,7 +637,8 @@ function certsFromDER(bytes, filename){
  * leading 0x30 => DER; "-----BEGIN ..." blocks => PEM (CERTIFICATE
  * blocks decode directly, PKCS7 blocks expand); Base64 text starting
  * with "MII" => headerless DER.
- * @returns {Array<{bytes:Uint8Array, label:string, fromBundle:boolean}>}
+ * @returns {Array<{bytes:Uint8Array, label:string}>} Labels serve as
+ *          fallback row names for certificates without a subject CN.
  */
 function extractCertBuffers(buf, filename){
   const bytes = new Uint8Array(buf);
@@ -649,13 +648,11 @@ function extractCertBuffers(buf, filename){
   const blocks = [...text.matchAll(/-----BEGIN (CERTIFICATE|PKCS7|PKCS #7 SIGNED DATA)-----([\s\S]*?)-----END \1-----/g)];
   if (blocks.length){
     const out = [];
-    // A file holding multiple certificates is a bundle: its members are
-    // named by subject CN downstream, the same as PKCS#7 members.
     const multi = blocks.length > 1;
     blocks.forEach((m, idx)=>{
       const der = b64ToBytes(m[2]);
       const base = multi ? filename+" ("+(idx+1)+")" : filename;
-      if (m[1] === "CERTIFICATE") out.push({ bytes: der, label: base, fromBundle: multi });
+      if (m[1] === "CERTIFICATE") out.push({ bytes: der, label: base });
       else out.push(...certsFromDER(der, base));
     });
     return out;
@@ -753,6 +750,7 @@ function spkiCurve(spki){
 function derSigToRaw(sig, size){
   const root = readTLV(sig, 0);
   const [rN, sN] = children(sig, root);
+  /* Strip leading zero octets and left-pad an INTEGER to curve size. */
   function fix(node){
     let c = sig.subarray(node.contentStart, node.end);
     while (c.length > size && c[0] === 0) c = c.subarray(1);
@@ -1116,8 +1114,8 @@ function esc(s){
  * Rebuild the report table from state. Recomputes expiration status
  * against the current time, applies search highlighting, updates the
  * count line, synchronizes the select-all checkbox (checked /
- * indeterminate / clear), relabels the export buttons for
- * single-certificate mode, and toggles export button availability.
+ * indeterminate / clear), and toggles export availability, including
+ * the single-certificate rule for the .cer button.
  */
 function render(){
   const tb = document.getElementById("tbody");
@@ -1197,8 +1195,10 @@ const errBox = document.getElementById("errors");
  * more certificates (see extractCertBuffers). Category, version, and
  * release date are taken from the batch fields; when category or
  * version is blank, values derived from the bundle filename are used
- * instead. Bundle-member rows are named by subject CN. Per-file parse
- * failures are collected and displayed without aborting the batch.
+ * instead. Every row is named by its certificate's subject CN, falling
+ * back to the source filename only when the certificate has no CN.
+ * Per-file parse failures are collected and displayed without aborting
+ * the batch.
  */
 async function handleFiles(fileList){
   errBox.style.display = "none"; errBox.innerHTML = "";
@@ -1291,7 +1291,7 @@ function csvField(s){
   s = String(s ?? "");
   return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
 }
-document.getElementById("export").addEventListener("click", ()=>{
+document.getElementById("export").addEventListener("click", async ()=>{
   const header = ["CATEGORY","VERSION","RELEASE DATE","CERTIFICATE NAME","ORGANIZATION",
                   "ISSUER COMMON NAME","NOT BEFORE","EXPIRATION","SERIAL","KEY",
                   "SIGNATURE ALGORITHM","THUMBPRINT (SHA-1)","THUMBPRINT (SHA-256)",
@@ -1303,21 +1303,18 @@ document.getElementById("export").addEventListener("click", ()=>{
     r.sigAlg, r.thumb1, r.thumb256,
     r.ocsp||"N/A", r.crl||"N/A", certType(r)
   ].map(csvField).join(",")));
-  const blob = new Blob(["\uFEFF"+lines.join("\r\n")], {type:"text/csv;charset=utf-8"});
-  const a = document.createElement("a");
-  const d = new Date();
-  a.href = URL.createObjectURL(blob);
-  a.download = "cert_report_"+d.getFullYear()+("0"+(d.getMonth()+1)).slice(-2)+("0"+d.getDate()).slice(-2)+".csv";
-  a.click();
-  URL.revokeObjectURL(a.href);
+  await saveBlob("\uFEFF"+lines.join("\r\n"), "text/csv;charset=utf-8", "cert_report_"+stamp()+".csv");
 });
 
 /* ======================================================================
    SECTION 7. EXPORTS
    All exports operate on the selected rows when a selection exists,
-   otherwise on every row. Exactly one certificate exports as a single
-   .pem or .cer named after the certificate; two or more export as a
-   deduplicated bundle.
+   otherwise on every row, with byte-identical duplicates removed.
+   Four outputs: a single certificate as raw DER (.cer, available only
+   when exactly one certificate is in scope), a concatenated PEM bundle
+   (a single certificate in scope produces a bare single-certificate
+   PEM), a degenerate PKCS#7 bundle (.p7b), and CSV. Every export
+   prompts for the output filename with a default supplied.
    ====================================================================== */
 
 /** Rows the exports operate on: the selection, or all rows if none. */
@@ -1359,14 +1356,22 @@ function b64Wrap(bytes){
   return btoa(bin).replace(/(.{64})/g, "$1\n").replace(/\n$/,"");
 }
 
-/** Trigger a client-side download of the given data. */
-function downloadBlob(data, type, filename){
+/**
+ * Save data to a file the user names. Prompts for the filename with a
+ * default supplied, then downloads to the browser's download location.
+ * Returns the chosen filename, or null on cancel.
+ */
+async function saveBlob(data, type, defaultName){
+  let name = window.prompt("File name:", defaultName);
+  if (name === null) return null;
+  name = name.trim() || defaultName;
   const blob = new Blob([data], {type});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = filename;
+  a.download = name;
   a.click();
   URL.revokeObjectURL(a.href);
+  return name;
 }
 
 /** YYYYMMDD stamp for export filenames. */
@@ -1381,23 +1386,22 @@ function exportNotice(msg){
   errBox.innerHTML = '<div class="err" style="color:var(--dim)">'+esc(msg)+'</div>';
 }
 
-document.getElementById("exportPem").addEventListener("click", ()=>{
+document.getElementById("exportPem").addEventListener("click", async ()=>{
   const uc = uniqueCerts();
   const { certs, duplicates } = uc;
   if (certs.length === 1){
     const r = certs[0];
     const pem = "-----BEGIN CERTIFICATE-----\n"+b64Wrap(r.raw)+"\n-----END CERTIFICATE-----\n";
-    const fname = certFileBase(r)+".pem";
-    downloadBlob(pem, "application/x-pem-file", fname);
-    exportNotice("Certificate exported: "+fname);
+    const name = await saveBlob(pem, "application/x-pem-file", certFileBase(r)+".pem");
+    if (name) exportNotice("Certificate exported: "+name);
     return;
   }
   const parts = certs.map(r =>
     "subject=CN = "+(r.subjectCN||"")+"\nissuer=CN = "+(r.issuerCN||"")+"\n" +
     "-----BEGIN CERTIFICATE-----\n"+b64Wrap(r.raw)+"\n-----END CERTIFICATE-----\n"
   );
-  downloadBlob(parts.join("\n"), "application/x-pem-file", "ca_bundle_"+stamp()+".pem");
-  exportNotice("PEM bundle exported: "+certs.length+" certificate(s)"+(uc.selectedOnly?" (selected only)":"")+(duplicates?", "+duplicates+" duplicate(s) removed":""));
+  const name = await saveBlob(parts.join("\n"), "application/x-pem-file", "ca_bundle_"+stamp()+".pem");
+  if (name) exportNotice("PEM bundle exported: "+name+" - "+certs.length+" certificate(s)"+(uc.selectedOnly?" (selected only)":"")+(duplicates?", "+duplicates+" duplicate(s) removed":""));
 });
 
 /* Minimal DER writer for the P7B export: an unsigned PKCS#7 SignedData
@@ -1429,16 +1433,15 @@ function derConcat(arrs){
   return out;
 }
 
-document.getElementById("exportCer").addEventListener("click", ()=>{
+document.getElementById("exportCer").addEventListener("click", async ()=>{
   const { certs } = uniqueCerts();
   if (certs.length !== 1) return;
   const r = certs[0];
-  const fname = certFileBase(r)+".cer";
-  downloadBlob(r.raw, "application/pkix-cert", fname);
-  exportNotice("Certificate exported: "+fname);
+  const name = await saveBlob(r.raw, "application/pkix-cert", certFileBase(r)+".cer");
+  if (name) exportNotice("Certificate exported: "+name);
 });
 
-document.getElementById("exportP7b").addEventListener("click", ()=>{
+document.getElementById("exportP7b").addEventListener("click", async ()=>{
   const uc = uniqueCerts();
   const { certs, duplicates } = uc;
   const version    = new Uint8Array([0x02,0x01,0x01]);                                     // INTEGER 1
@@ -1450,10 +1453,23 @@ document.getElementById("exportP7b").addEventListener("click", ()=>{
   const oidSigned  = new Uint8Array([0x06,0x09,0x2A,0x86,0x48,0x86,0xF7,0x0D,0x01,0x07,0x02]);
   const explicit0  = derWrap(0xA0, signedData);
   const p7b        = derWrap(0x30, derConcat([oidSigned, explicit0]));
-  downloadBlob(p7b, "application/x-pkcs7-certificates", "ca_bundle_"+stamp()+".der.p7b");
-  exportNotice("P7B bundle exported: "+certs.length+" certificate(s)"+(uc.selectedOnly?" (selected only)":"")+(duplicates?", "+duplicates+" duplicate(s) removed":""));
+  const name = await saveBlob(p7b, "application/x-pkcs7-certificates", "ca_bundle_"+stamp()+".der.p7b");
+  if (name) exportNotice("P7B bundle exported: "+name+" - "+certs.length+" certificate(s)"+(uc.selectedOnly?" (selected only)":"")+(duplicates?", "+duplicates+" duplicate(s) removed":""));
 });
 
+/* ======================================================================
+   SECTION 8. VERIFICATION PANEL
+   vState.cms        - parsed CMS from the signature file, if loaded.
+   vState.pool       - certificates from any provided files (chain
+                       building input).
+   vState.pending    - all non-signature files, held unhashed until the
+                       signed manifest names them by filename or matches
+                       them by content hash.
+   vState.fileHashes - computed digests, keyed by filename, using each
+                       manifest entry's own algorithm.
+   vState.aliasMatch - pending filename -> manifest key for files
+                       identified by content rather than name.
+   ====================================================================== */
 const vState = { cms: null, cmsName: "", pool: [], pending: new Map(), fileHashes: new Map(), aliasMatch: new Map(), lastResult: null };
 const vResults = document.getElementById("vresults");
 
