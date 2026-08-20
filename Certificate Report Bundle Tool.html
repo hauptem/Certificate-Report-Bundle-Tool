@@ -3,7 +3,7 @@
   =============================================================================
   Certificate Report/Bundle Tool
   =============================================================================
-  Version: v1.0 
+  Version: v1.0 (August 19 2026)
   Author: Eric Haupt
   Released under the MIT License.
   https://github.com/hauptem/Certificate-Report-Bundle-Tool
@@ -46,6 +46,7 @@
   .cmp-side{flex:1;min-width:0}
   .cmp-side .zlabel{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
   .cmp-side .zlabel button{padding:2px 9px;font-size:11px;font-weight:400}
+  dialog#compare .guide-h .titlebtns button{width:120px;padding-left:0;padding-right:0}
   .cmp-zone{border:2px dashed #3f4c5f;border-radius:3px;background:var(--panel2);padding:18px 10px;text-align:center;color:var(--dim);cursor:pointer;font-size:12.5px}
   .cmp-zone.drag{border-color:var(--accent);color:var(--accent)}
   .cmp-zone .zcount{display:block;margin-top:4px;font-family:var(--mono);font-size:12px;color:var(--text)}
@@ -57,6 +58,7 @@
   #cmpResults .st-changed{color:#8a5a00;font-weight:600}
   #cmpResults .st-extra{color:#8a5a00;font-weight:600;white-space:nowrap}
   #cmpResults .st-both{color:#2e6b45;font-weight:600;white-space:nowrap}
+  #cmpResults td.cell-diff{font-weight:700}
   #cmpResults tbody tr.row-red td{background:#f7dcdc}
   #cmpResults tbody tr.row-amber td{background:#faf0cd}
   .cmp-zone.zone-red{border-color:#c05050;border-style:solid}
@@ -247,7 +249,8 @@
   <div class="guide-h">
     <b id="cmpTitle">Compare Bundles</b>
     <div class="titlebtns">
-      <button id="cmpToggle" title="Show every certificate in both sets">Show all</button>
+      <button id="cmpToggle" title="Show every certificate in both sets" disabled>Show all</button>
+      <button id="cmpClearBoth" title="Clear both sets">Clear Both</button>
       <button id="cmpClose" title="Close">Close</button>
     </div>
   </div>
@@ -1775,8 +1778,14 @@ function cmpRender(errs){
   const parts = [];
   if (errs && errs.length)
     for (const e of errs) parts.push('<div class="vline vbad"><span class="mark">\u2717</span> '+esc(e)+'</div>');
+  const toggle = document.getElementById("cmpToggle");
+  const haveBoth = cmpState.ref.size > 0 && cmpState.comp.size > 0;
+  toggle.disabled = !haveBoth;
+  if (!haveBoth) cmpState.showAll = false;
+  toggle.textContent = cmpState.showAll ? "Show differences" : "Show all";
+  toggle.title = cmpState.showAll ? "Show only the differences" : "Show every certificate in both sets";
   document.getElementById("cmpZoneComp").classList.remove("zone-red","zone-amber");
-  if (!cmpState.ref.size || !cmpState.comp.size){
+  if (!haveBoth){
     box.innerHTML = parts.join("");
     return;
   }
@@ -1814,26 +1823,52 @@ function cmpRender(errs){
     box.innerHTML = parts.join("");
     return;
   }
-  const row = (status, stClass, e, shade)=>{
+  const row = (status, stClass, e, shade, diff)=>{
     const c = e.c;
+    diff = diff || new Set();
+    const td = (field, cls, content)=>
+      '<td class="'+(cls?cls+' ':'')+(diff.has(field)?'cell-diff':'')+'">'+content+'</td>';
     return '<tr class="'+shade+'">' +
       '<td class="'+stClass+'">'+status+'</td>' +
-      '<td>'+esc(c.subjectCN || "(no CN)")+'</td>' +
-      '<td>'+esc(c.org)+'</td>' +
-      '<td>'+esc(c.issuerCN ? "CN = "+c.issuerCN : "")+'</td>' +
-      '<td>'+fmtDate(c.notBefore)+'</td>' +
-      '<td>'+fmtDate(c.notAfter)+'</td>' +
-      '<td class="mono-sm">'+esc(c.serialHex)+'</td>' +
-      '<td>'+esc(keyInfo(c.spkiBytes))+'</td>' +
-      '<td>'+esc(sigAlgName(c.sigAlgOID))+'</td>' +
-      '<td class="mono-sm">'+esc(e.thumb1)+'</td>' +
+      td("name","",esc(c.subjectCN || "(no CN)")) +
+      td("org","",esc(c.org)) +
+      td("issuer","",esc(c.issuerCN ? "CN = "+c.issuerCN : "")) +
+      td("nb","",fmtDate(c.notBefore)) +
+      td("na","",fmtDate(c.notAfter)) +
+      td("serial","mono-sm",esc(c.serialHex)) +
+      td("key","",esc(keyInfo(c.spkiBytes))) +
+      td("sig","",esc(sigAlgName(c.sigAlgOID))) +
+      td("thumb","mono-sm",esc(e.thumb1)) +
       '</tr>';
+  };
+  /**
+   * Fields whose values differ between the two sides of a changed
+   * group. Compared as value sets so multi-certificate groups behave.
+   * These cells render bold on both rows to show exactly what changed.
+   */
+  const diffFields = (refs, comps)=>{
+    const vals = (arr, fn)=>[...new Set(arr.map(fn))].sort().join("|");
+    const fns = {
+      name:   e=>e.c.subjectCN || "",
+      org:    e=>e.c.org || "",
+      issuer: e=>e.c.issuerCN || "",
+      nb:     e=>fmtDate(e.c.notBefore),
+      na:     e=>fmtDate(e.c.notAfter),
+      serial: e=>e.c.serialHex,
+      key:    e=>keyInfo(e.c.spkiBytes),
+      sig:    e=>sigAlgName(e.c.sigAlgOID),
+      thumb:  e=>e.thumb1
+    };
+    const out = new Set();
+    for (const f in fns) if (vals(refs, fns[f]) !== vals(comps, fns[f])) out.add(f);
+    return out;
   };
   const trs = [];
   for (const e of missing) trs.push(row("MISSING IN COMPARISON BUNDLE","st-missing",e,"row-red"));
   for (const [refs, comps] of changed){
-    for (const e of refs)  trs.push(row("CHANGED","st-changed",e,"row-amber"));
-    for (const e of comps) trs.push(row("CHANGED","st-changed",e,"row-amber"));
+    const diff = diffFields(refs, comps);
+    for (const e of refs)  trs.push(row("CHANGED","st-changed",e,"row-amber",diff));
+    for (const e of comps) trs.push(row("CHANGED","st-changed",e,"row-amber",diff));
   }
   for (const e of extra) trs.push(row("MISSING IN REFERENCE BUNDLE","st-extra",e,"row-amber"));
   if (cmpState.showAll){
@@ -1860,10 +1895,13 @@ document.getElementById("compareBtn").addEventListener("click", ()=>{
   if (cmpDlg.showModal) cmpDlg.showModal(); else cmpDlg.setAttribute("open","");
 });
 document.getElementById("cmpToggle").addEventListener("click", ()=>{
+  if (!cmpState.ref.size || !cmpState.comp.size) return;
   cmpState.showAll = !cmpState.showAll;
-  const b = document.getElementById("cmpToggle");
-  b.textContent = cmpState.showAll ? "Show differences" : "Show all";
-  b.title = cmpState.showAll ? "Show only the differences" : "Show every certificate in both sets";
+  cmpRender();
+});
+document.getElementById("cmpClearBoth").addEventListener("click", ()=>{
+  cmpState.ref.clear();
+  cmpState.comp.clear();
   cmpRender();
 });
 document.getElementById("cmpClose").addEventListener("click", ()=>{
