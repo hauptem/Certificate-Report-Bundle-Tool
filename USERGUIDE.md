@@ -1,4 +1,4 @@
-# Certificate Report/Bundle Creator User Guide
+# Certificate Report/Bundle Tool - User Guide
 
 Open `Certificate Report Bundle Creator.html` in a browser. Three sections: Verify, Import, Report. They work independently.
 
