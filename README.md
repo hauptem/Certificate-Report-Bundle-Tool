@@ -1,6 +1,6 @@
 # Certificate Report/Bundle Tool
 
-A single HTML file that inspects X.509 certificates, verifies signed bundle releases, and exports certificate bundles. Open `Certificate Report Bundle Tool.html` in a browser.
+A single HTML file that inspects X.509 certificates, verifies signed bundle releases, and exports certificate bundles. Open `Certificate Report Bundle Tool.html` in a modern browser.
 
 <img width="1937" height="918" alt="Image" src="https://github.com/user-attachments/assets/9aa4be28-b68d-4402-907e-db9293e147c1" />
 
