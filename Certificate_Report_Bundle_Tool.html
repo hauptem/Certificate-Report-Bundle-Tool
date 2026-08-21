@@ -1683,10 +1683,13 @@ function vRender(){
       '<td class="mono-sm">'+(mHash ? esc(mHash) : na)+'</td>' +
       '<td class="mono-sm">'+(cHash ? esc(cHash) : na)+'</td>' +
       '</tr>';
+    // Certificate rows first across all groups, non-certificate file
+    // rows (e.g. README) last; the stable sort preserves group and drop
+    // order within each half. Manifest entries with no provided file
+    // sort with the certificate half.
     const trs = [];
-    // Certificate files first, non-certificate files (e.g. README) last;
-    // stable sort preserves drop order within each half.
-    const ordered = [...vState.pending.keys()].sort((a,b)=>(vState.importable.has(a)?0:1)-(vState.importable.has(b)?0:1));
+    const push = (html, name)=>trs.push([name && !vState.importable.has(name) ? 1 : 0, html]);
+    const ordered = [...vState.pending.keys()];
     if (manifest && manifest.size){
       // Group 1: manifest-listed files, compared with both values shown.
       for (const name of ordered){
@@ -1695,40 +1698,40 @@ function vRender(){
         const expected = entry.hash;
         const hash = vState.fileHashes.get(name);
         if (expected === hash){
-          trs.push(frow(name, name, "st-ok", "\u2713 Matches signed manifest", expected, hash));
+          push(frow(name, name, "st-ok", "\u2713 Matches signed manifest", expected, hash), name);
         } else {
-          trs.push(frow(null, name, "st-bad", "\u2717 HASH MISMATCH - altered or corrupted", expected, hash||"", "row-red"));
+          push(frow(null, name, "st-bad", "\u2717 HASH MISMATCH - altered or corrupted", expected, hash||"", "row-red"), name);
         }
       }
       // Group 1b: files matched to manifest entries by content hash.
       for (const [name, mkey] of vState.aliasMatch){
         const entry = manifest.get(mkey);
-        trs.push(frow(name, name, "st-ok", "\u2713 Matches "+esc(entry.display || mkey)+" (filename differs)", entry.hash, vState.fileHashes.get(name)));
+        push(frow(name, name, "st-ok", "\u2713 Matches "+esc(entry.display || mkey)+" (filename differs)", entry.hash, vState.fileHashes.get(name)), name);
       }
       // Group 2: manifest entries with no corresponding provided file.
       const aliased = new Set(vState.aliasMatch.values());
       for (const [mname, entry] of manifest){
         if (aliased.has(mname)) continue;
         if (![...vState.pending.keys()].some(k=>k.toLowerCase()===mname))
-          trs.push(frow(null, entry.display || mname, "st-dim", "Listed in manifest, not provided", entry.hash, ""));
+          push(frow(null, entry.display || mname, "st-dim", "Listed in manifest, not provided", entry.hash, ""), null);
       }
       // Group 3: provided files matching nothing.
       const contentName = vState.lastResult && vState.lastResult.contentName;
       for (const name of ordered){
         if (manifest.has(name.toLowerCase()) || vState.aliasMatch.has(name)) continue;
         if (name === contentName)
-          trs.push(frow(name, name, "st-dim", "Signed content (verified above)", "", ""));
+          push(frow(name, name, "st-dim", "Signed content (verified above)", "", ""), name);
         else
-          trs.push(frow(name, name, "st-dim", "Skipped (not in manifest)", "", ""));
+          push(frow(name, name, "st-dim", "Skipped (not in manifest)", "", ""), name);
       }
     } else {
       for (const name of ordered){
-        trs.push(frow(name, name, "st-dim", "Awaiting manifest", "", ""));
+        push(frow(name, name, "st-dim", "Awaiting manifest", "", ""), name);
       }
     }
     parts.push('<div class="tablewrap"><table><thead><tr>' +
       '<th></th><th>File Name</th><th>Status</th><th>Manifest Hash</th><th>Computed Hash</th>' +
-      '</tr></thead><tbody>'+trs.join("")+'</tbody></table></div>');
+      '</tr></thead><tbody>'+trs.sort((a,b)=>a[0]-b[0]).map(t=>t[1]).join("")+'</tbody></table></div>');
     parts.push('</div>');
   }
   vResults.innerHTML = parts.join("");
