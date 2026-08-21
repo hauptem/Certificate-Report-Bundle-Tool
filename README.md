@@ -4,9 +4,9 @@ A single HTML file that inspects X.509 certificates, verifies signed bundle rele
 
 Usage: Open `Certificate Report Bundle Tool.html` in a modern browser.
 
-<img width="2732" height="1294" alt="Image" src="https://github.com/user-attachments/assets/8dd81efe-d1bb-42de-a6a4-1f29c2990765" />
+<img width="2576" height="1153" alt="Image" src="https://github.com/user-attachments/assets/a0a1c2aa-9b87-4a6d-bae3-6ddb28a81548" />
 
-<img width="2655" height="1103" alt="Image" src="https://github.com/user-attachments/assets/d9a476c6-076f-4e77-a9ea-424f0ac8f3e6" />
+<img width="2576" height="1070" alt="Image" src="https://github.com/user-attachments/assets/adf71261-95bf-447a-89d0-708b01531536" />
 
 ## Capabilities
 
