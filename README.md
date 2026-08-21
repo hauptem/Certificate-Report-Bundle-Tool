@@ -2,8 +2,6 @@
 
 A single HTML file that inspects X.509 certificates, verifies signed bundle releases, exports certificate bundles in various formats, and exports a csv for certs/bundles displaying all relevant information. 
 
-Usage: Open `Certificate Report Bundle Tool.html` in a modern browser, either directly from disk (`file://`) or over HTTPS. WebCrypto is unavailable over plain HTTP, and the tool reports this at startup rather than failing during verification.
-
 <img width="2732" height="1294" alt="Image" src="https://github.com/user-attachments/assets/8dd81efe-d1bb-42de-a6a4-1f29c2990765" />
 
 <img width="2655" height="1103" alt="Image" src="https://github.com/user-attachments/assets/d9a476c6-076f-4e77-a9ea-424f0ac8f3e6" />
