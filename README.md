@@ -20,13 +20,13 @@ A single HTML file that inspects X.509 certificates, verifies signed bundle rele
 
 ## Notes
 
-- This tool does not perform revocation status. OCSP and CRL URLs captured from the certs and presented. 
+- This tool does not perform revocation status. OCSP and CRL URLs are captured from the certs and simply presented. 
 - Signed manifests must be in sha256sum, sha384sum, or sha512sum format. Signature files are recognized by the extensions `.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, and `.sig`
-- Folder drag-and-drop is not supported for pages opened from disk. Select all the files directly and drop them into the tool.
+- Folder drag-and-drop is *not* supported for pages opened from disk. Select all the files directly and simply drop them into the tool.
 
 ## Documentation
 
-A user guide is embedded in the tool, opened from the User Guide button. [USERGUIDE](USERGUIDE.md) contains the same material.
+A user guide is embedded and can be opened from the 'User Guide' button. [USERGUIDE](USERGUIDE.md) contains the same material.
 
 ## License
 
