@@ -2,7 +2,7 @@
 
 A single HTML file that inspects X.509 certificates, verifies signed bundle releases, exports certificate bundles in various formats, and exports a csv for certs/bundles displaying all relevant information. 
 
-Usage: Open `Certificate_Report_Bundle_Tool.html` in a modern browser
+Usage: Open `Certificate Report Bundle Tool.html` in a modern browser, either directly from disk (`file://`) or over HTTPS. WebCrypto is unavailable over plain HTTP, and the tool reports this at startup rather than failing during verification.
 
 <img width="2732" height="1294" alt="Image" src="https://github.com/user-attachments/assets/8dd81efe-d1bb-42de-a6a4-1f29c2990765" />
 
@@ -10,11 +10,11 @@ Usage: Open `Certificate_Report_Bundle_Tool.html` in a modern browser
 
 ## Capabilities
 
-**Verify Bundle.** This checks a signed release against a manifest file to ensure integrity. The tool verifies the signature on the publisher's hash manifest, validates the signer's certificate chain to a self-signed root, and compares each bundle file's hash against the signed manifest. Chain links are required to be CA certificates (Basic Constraints), so an end-entity certificate cannot be used as an issuer. Results are shown as a table listing each file's status, manifest hash, and computed hash. The root's fingerprint is displayed for comparison against the issuing authority's published value. Attached and detached CMS signatures are supported, with RSA PKCS#1 v1.5, RSA-PSS, and ECDSA (P-256/P-384/P-521). Files containing certificates carry an Import button in the results, so a verified bundle can be added to the report without a second drop.
+**Verify.** This checks a signed release against a manifest file to ensure integrity. The tool verifies the signature on the publisher's hash manifest, validates the signer's certificate chain to a self-signed root, and compares each bundle file's hash against the signed manifest. Chain links are required to be CA certificates (Basic Constraints), so an end-entity certificate cannot be used as an issuer. Results are shown as a table listing each file's status, manifest hash, and computed hash. The root's fingerprint is displayed for comparison against the issuing authority's published value. Attached and detached CMS signatures are supported, with RSA PKCS#1 v1.5, RSA-PSS, and ECDSA (P-256/P-384/P-521). Files containing certificates carry an Import button in the results, so a verified bundle can be added to the report without a second drop.
 
 **Compare Bundles.** Diffs two certificate sets in a report-style table. 
 
-**Import Certificates.** Reads DER, PEM, headerless Base64, and PKCS#7 bundles. Certificates already in the report are skipped rather than added again, so importing the same bundle in multiple encodings does not create duplicate rows.
+**Import.** Reads DER, PEM, headerless Base64, and PKCS#7 bundles. Certificates already in the report are skipped rather than added again, so importing the same bundle in multiple encodings does not create duplicate rows.
 
 **Report.** One row per certificate: subject, issuer, validity dates, serial number, key and signature algorithms, SHA-1 thumbprint, OCSP and CRL URLs, and certificate type. Expired certificates are flagged in red. The search box highlights matching rows across all columns, including serials and thumbprints. Checkboxes select specific rows for export.
 

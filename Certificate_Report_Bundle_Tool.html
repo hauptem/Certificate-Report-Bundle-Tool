@@ -180,7 +180,7 @@
 </div>
 
 <details class="panel" open>
-  <summary class="panel-h"><span class="step">1</span> Verify bundle <span class="panel-sub">optional - checks signature and file hashes</span><span class="spacer"></span><button id="vclear" type="button" title="Reset for another bundle">Clear</button></summary>
+  <summary class="panel-h"><span class="step">1</span> Verify <span class="panel-sub">optional - checks signature and file hashes</span><span class="spacer"></span><button id="vclear" type="button" title="Reset for another bundle">Clear</button></summary>
   <div class="panel-b">
     <div id="vdrop" class="dropzone" role="button" tabindex="0" aria-label="Drop verification files">
       Drop the bundle's .sha256 file, the CA chain .pem, and the bundle files &mdash; or click to browse
@@ -191,7 +191,7 @@
 </details>
 
 <details class="panel" open>
-  <summary class="panel-h"><span class="step">2</span> Import certificates</summary>
+  <summary class="panel-h"><span class="step">2</span> Import</summary>
   <div class="panel-b">
     <div class="batch">
       <div class="field">
@@ -289,9 +289,9 @@
     <button id="guideClose" title="Close">Close</button>
   </div>
   <div class="guide-b">
-    <p>This tool inspects X.509 certificates, verifies signed bundle releases, and exports certificate bundles.</p>
+    <p>This tool inspects X.509 certificates, verifies signed bundle releases, and exports certificate bundles. It has three sections: Verify, Import, and Report.</p>
 
-    <h2>Verify Bundle</h2>
+    <h2>Verify</h2>
     <p>Use this section to check a signed release before trusting it. Drop the signature file, the CA chain file if one was provided, and the bundle files. The tool verifies the signature on the manifest, validates the signer's certificate chain, and compares each file's hash against the signed manifest. Results are shown as a table listing each file's status, manifest hash, and computed hash, with certificate files listed first.</p>
     <p>The chain is verified up to a self-signed root. Because the root arrives in the same download, the tool displays its fingerprint rather than trusting it. Compare the fingerprint against the value published by the issuing authority.</p>
     <p>Red results indicate the bundle cannot be trusted: an invalid signature, altered content, a broken chain, a non-CA certificate used as an issuer, or a file hash mismatch. Amber results indicate a warning, such as a missing chain file or an expired certificate.</p>
@@ -303,7 +303,7 @@
     <p>Differences are shown as a table with the same fields as the report. A certificate present in the reference but not the comparison is marked MISSING IN COMPARISON BUNDLE in red; the reverse is marked MISSING IN REFERENCE BUNDLE in amber. A certificate with the same subject but different content is marked CHANGED, with one row per version. Matching uses the full subject rather than the common name. The Comparison drop zone is outlined red when entries are missing from it and amber when it only differs.</p>
     <p>Certificates present in both sets are summarized as a count. The Show all button adds them to the table as IN BOTH rows.</p>
 
-    <h2>Import Certificates</h2>
+    <h2>Import</h2>
     <p>Drop certificate files to add them to the report. Supported formats are DER, PEM, headerless Base64, and PKCS#7 bundles. Bundles expand to one row per certificate, and each row is named by the certificate's subject CN. A certificate already in the report is skipped rather than added again, so dropping the same bundle in multiple encodings does not create duplicate rows; a notice above the table shows the skipped count. Files that fail to parse are listed above the table without affecting the rest of the drop.</p>
     <p>The Category, Version, and Release Date fields are optional and populate the corresponding report columns for each drop. When Category or Version is blank, filenames following the <code>certificates_pkcs7_v5_14_dod</code> convention fill them automatically; values you type take precedence.</p>
 

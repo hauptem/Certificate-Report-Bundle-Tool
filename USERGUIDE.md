@@ -1,8 +1,8 @@
 # Certificate Report/Bundle Tool - User Guide
 
-Open `Certificate Report Bundle Tool.html` in a modern browser. The tool has three sections: Verify Bundle, Import Certificates, and Report. They work independently.
+Open `Certificate Report Bundle Tool.html` in a browser, either directly from disk (`file://`) or over HTTPS; WebCrypto is unavailable over plain HTTP and the tool reports this at startup. The tool has three sections: Verify, Import, and Report. They work independently.
 
-## Verify Bundle
+## Verify
 
 Use this section to check a signed release before trusting it. Drop the signature file, the CA chain file if one was provided, and the bundle files. The tool verifies the signature on the manifest, validates the signer's certificate chain, and compares each file's hash against the signed manifest. Results are shown as a table listing each file's status, manifest hash, and computed hash, with certificate files listed first.
 
@@ -26,7 +26,7 @@ Differences are shown as a table with the same fields as the report. A certifica
 
 Certificates present in both sets are summarized as a count. The Show all button adds them to the table as IN BOTH rows.
 
-## Import Certificates
+## Import
 
 Drop certificate files to add them to the report. Supported formats are DER, PEM, headerless Base64, and PKCS#7 bundles. Bundles expand to one row per certificate, and each row is named by the certificate's subject CN. A certificate already in the report is skipped rather than added again, so dropping the same bundle in multiple encodings does not create duplicate rows; a notice above the table shows the skipped count. Files that fail to parse are listed above the table without affecting the rest of the drop.
 
