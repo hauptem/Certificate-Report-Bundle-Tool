@@ -1,6 +1,8 @@
 # Certificate Report/Bundle Tool - User Guide
 
-Open `Certificate Report Bundle Tool.html` in a browser, either directly from disk (`file://`) or over HTTPS; WebCrypto is unavailable over plain HTTP and the tool reports this at startup. The tool has three sections: Verify, Import, and Report. They work independently.
+Usage: Open `Certificate_Report_Bundle_Tool.html` in a modern browser
+
+The tool has three sections: Verify, Import, and Report. They work independently.
 
 ## Verify
 
@@ -18,14 +20,6 @@ Recognized signature extensions are `.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p
 
 The Clear button resets the panel for another bundle.
 
-## Compare Bundles
-
-The Compare button opens a two-sided comparison. Drop certificates or bundles on the Reference and Comparison sides. Either side accepts the same formats as import, across multiple files. Results appear once both sides hold certificates.
-
-Differences are shown as a table with the same fields as the report. A certificate present in the reference but not the comparison is marked MISSING IN COMPARISON BUNDLE in red; the reverse is marked MISSING IN REFERENCE BUNDLE in amber. A certificate with the same subject but different content is marked CHANGED, with one row per version. Matching uses the full subject rather than the common name. The Comparison drop zone is outlined red when entries are missing from it and amber when it only differs.
-
-Certificates present in both sets are summarized as a count. The Show all button adds them to the table as IN BOTH rows.
-
 ## Import
 
 Drop certificate files to add them to the report. Supported formats are DER, PEM, headerless Base64, and PKCS#7 bundles. Bundles expand to one row per certificate, and each row is named by the certificate's subject CN. A certificate already in the report is skipped rather than added again, so dropping the same bundle in multiple encodings does not create duplicate rows; a notice above the table shows the skipped count. Files that fail to parse are listed above the table without affecting the rest of the drop.
@@ -38,7 +32,15 @@ Each certificate appears as one row showing its subject, issuer, validity dates,
 
 The search box highlights matching rows across all columns, including serials and thumbprints, without hiding the other rows. Use the checkboxes to select rows for export.
 
-## Exports
+## Compare
+
+The Compare button opens a two-sided comparison. Drop certificates or bundles on the Reference and Comparison sides. Either side accepts the same formats as import, across multiple files. Results appear once both sides hold certificates.
+
+Differences are shown as a table with the same fields as the report. A certificate present in the reference but not the comparison is marked MISSING IN COMPARISON BUNDLE in red; the reverse is marked MISSING IN REFERENCE BUNDLE in amber. A certificate with the same subject but different content is marked CHANGED, with one row per version. Matching uses the full subject rather than the common name. The Comparison drop zone is outlined red when entries are missing from it and amber when it only differs.
+
+Certificates present in both sets are summarized as a count. The Show all button adds them to the table as IN BOTH rows.
+
+## Export
 
 Exports include the selected certificates, or all certificates if none are selected. Duplicate certificates are removed automatically. Each export prompts for the filename, with a default supplied, and a status line under the Report header confirms the result.
 
