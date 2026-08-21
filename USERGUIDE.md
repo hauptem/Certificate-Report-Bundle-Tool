@@ -1,65 +1,48 @@
 # Certificate Report/Bundle Tool - User Guide
 
-Usage: Open `Certificate_Report_Bundle_Tool.html` in a modern browser
+Open `Certificate Report Bundle Tool.html` in a browser, from disk (`file://`) or over HTTPS. WebCrypto isn't available over plain HTTP, and the tool says so at startup if that's the problem.
 
-The tool has three sections: Verify, Import, and Report. They work independently.
+The tool has three sections: Verify checks a signed release, Import reads certificates into the report, and Report displays and exports them.
 
 ## Verify
 
-Use this section to check a signed release before trusting it. Drop the signature file, the CA chain file if one was provided, and the bundle files. The tool verifies the signature on the manifest, validates the signer's certificate chain, and compares each file's hash against the signed manifest. Results are shown as a table listing each file's status, manifest hash, and computed hash, with certificate files listed first.
+To verify a release, drop all of its files into the zone: the signature file, the chain file if there is one, and the bundle files. The tool checks the manifest signature, builds the signer's chain, and compares every file against the signed manifest. Problems are marked in red, warnings in amber, and each file row shows the manifest hash next to the computed one.
 
-The chain is verified up to a self-signed root. Every link in the chain must be a CA certificate (Basic Constraints), so an end-entity certificate cannot be used as an issuer. Because the root arrives in the same download, the tool displays its fingerprint rather than trusting it. Compare the fingerprint against the value published by the issuing authority.
+The tool never trusts the root certificate, since it came in the same download. It shows the root's fingerprints instead. Compare one of them against the value the issuing authority publishes, and the release is verified once that matches and everything else is clean.
 
-Red results indicate the bundle cannot be trusted: an invalid signature, altered content, a broken chain, a non-CA certificate used as an issuer, or a file hash mismatch. Amber results indicate a warning, such as a missing chain file or an expired certificate.
+Use the Import buttons in the results to send a verified file's certificates to the report without dropping it again.
 
-A file that was renamed after download is matched to its manifest entry by content hash and reported accordingly. For detached signatures, include the manifest file in the drop.
-
-Files containing certificates show an Import button in the results, and an Import all button appears when several are present. These add the file's certificates to the report directly, using the same batch fields, filename-derived metadata, and duplicate skipping as the import drop zone, so verified bundles do not need a second drop.
-
-Recognized signature extensions are `.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, and `.sig`. Manifests must be in sha256sum, sha384sum, or sha512sum format. Supported signature algorithms are RSA PKCS#1 v1.5, RSA-PSS, and ECDSA on P-256, P-384, and P-521.
-
-The Clear button resets the panel for another bundle.
+Signature files are recognized by their extension (`.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, `.sig`), and the manifest must be sha256sum, sha384sum, or sha512sum output. Attached and detached signatures both work, with RSA PKCS#1 v1.5, RSA-PSS, or ECDSA on P-256, P-384, or P-521.
 
 ## Import
 
-Drop certificate files to add them to the report. Supported formats are DER, PEM, headerless Base64, and PKCS#7 bundles. Bundles expand to one row per certificate, and each row is named by the certificate's subject CN. A certificate already in the report is skipped rather than added again, so dropping the same bundle in multiple encodings does not create duplicate rows; a notice above the table shows the skipped count. Files that fail to parse are listed above the table without affecting the rest of the drop.
+Drop certificate files into the zone. DER, PEM, headerless Base64, and PKCS#7 bundles are all accepted, and bundles expand to one row per certificate. Certificates already in the report are skipped, so the same bundle in two encodings won't create duplicates.
 
-The Category, Version, and Release Date fields are optional and populate the corresponding report columns for each drop. When Category or Version is blank, filenames following the `certificates_pkcs7_v5_14_dod` convention fill them automatically; values you type take precedence.
+Fill in Category, Version, or Release Date before dropping to label everything in that drop. Filenames like `certificates_pkcs7_v2_1_internal` fill Category and Version automatically when you leave them blank.
 
 ## Report
 
-Each certificate appears as one row showing its subject, issuer, validity dates, serial number, key and signature algorithms, SHA-1 thumbprint, revocation URLs, and certificate type. Expired certificates are flagged in red. Click the Certificate Name or Expiration header to sort.
-
-The search box highlights matching rows across all columns, including serials and thumbprints, without hiding the other rows. Use the checkboxes to select rows for export.
+Each certificate is a row showing its subject, issuer, validity, serial, algorithms, thumbprint, revocation URLs, and type, with expired and not-yet-valid certificates flagged. Sort by clicking the Certificate Name or Expiration header, and use the search box to highlight matches anywhere in the table. Check rows to select them for export, or remove them individually with the button at the end of each row.
 
 ## Compare
 
-The Compare button opens a two-sided comparison. Drop certificates or bundles on the Reference and Comparison sides. Either side accepts the same formats as import, across multiple files. Results appear once both sides hold certificates.
-
-Differences are shown as a table with the same fields as the report. A certificate present in the reference but not the comparison is marked MISSING IN COMPARISON BUNDLE in red; the reverse is marked MISSING IN REFERENCE BUNDLE in amber. A certificate with the same subject but different content is marked CHANGED, with one row per version. Matching uses the full subject rather than the common name. The Comparison drop zone is outlined red when entries are missing from it and amber when it only differs.
-
-Certificates present in both sets are summarized as a count. The Show all button adds them to the table as IN BOTH rows.
+Compare, in the title bar, diffs two certificate sets. Drop the baseline on the Reference side and the set you're evaluating on the Comparison side; differences appear as a table once both sides have certificates. Matching uses the full subject, so same-named certificates from different organizations aren't confused.
 
 ## Export
 
-Exports include the selected certificates, or all certificates if none are selected. Duplicate certificates are removed automatically. Each export prompts for the filename, with a default supplied, and a status line under the Report header confirms the result.
-
-- Export .cer writes a single certificate as DER, named after the certificate. Available when exactly one certificate is in scope
-- Export PEM bundle writes a concatenated PEM file suitable for use as a CA file
-- Export P7B bundle writes a DER-encoded PKCS#7 bundle
-- Export CSV writes the report table, including SHA-256 thumbprints
+Exports cover the checked rows, or the whole report if nothing is checked, with duplicates removed. Use PEM for an openssl-style CA file, P7B for Windows and Java trust stores, .cer for a single certificate as DER, CSV for a spreadsheet copy of the report with SHA-256 thumbprints added, and HTML for a standalone copy of the report you can share, archive, or print.
 
 ## Notes
 
-- Revocation status is not checked. OCSP and CRL URLs are reported for use with external tools
-- Windows may block downloaded .cer files. Right-click the file, open Properties, and select Unblock
+- The tool doesn't check revocation. The OCSP and CRL URLs in the report are for use with external tools
+- Windows may block a downloaded .cer file. Right-click it, open Properties, and select Unblock
 
 ## Troubleshooting
 
-- If a signature file is not recognized, rename it to one of the recognized extensions. The signature covers the file content, so renaming does not affect verification
-- If a detached signature reports that no files match, include the manifest file in the drop
-- If the signer certificate is not found, drop the publisher's chain file. The signature file does not embed the signer's certificate
-- If the chain is incomplete, drop the missing issuer. Certificates from any dropped file are used for chain building
-- A file reported as skipped matches nothing in the manifest by name or content. This is expected for chain files and documentation included in a release
-- Folder drag-and-drop is not supported for pages opened from disk. Select the files directly
-- If fewer rows appear than expected, check the notices above the table for files that failed to parse
+- The signature file isn't recognized: rename it to one of the recognized extensions. The signature covers the file's content, so the name doesn't affect verification
+- A detached signature reports that no files match: include the manifest file itself in the drop
+- The signer certificate isn't found: drop the publisher's chain file. The signature file doesn't embed the signer's certificate
+- The chain is incomplete: drop the missing issuer certificate. Certificates from every dropped file are used for chain building
+- A file shows as skipped: nothing in the manifest matches it by name or content. This is normal for chain files and documentation
+- Folder drag-and-drop doesn't work when the page is opened from disk: select the files inside the folder instead
+- Fewer rows appear than expected: check the notices above the Import drop zone for files that failed to parse

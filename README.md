@@ -2,6 +2,8 @@
 
 A single HTML file that inspects X.509 certificates, verifies signed bundle releases, exports certificate bundles in various formats, and exports a csv for certs/bundles displaying all relevant information. 
 
+Usage: Open `Certificate Report Bundle Tool.html` in a modern browser, either directly from disk (`file://`) or over HTTPS. WebCrypto is unavailable over plain HTTP, and the tool reports this at startup rather than failing during verification.
+
 <img width="2732" height="1294" alt="Image" src="https://github.com/user-attachments/assets/8dd81efe-d1bb-42de-a6a4-1f29c2990765" />
 
 <img width="2655" height="1103" alt="Image" src="https://github.com/user-attachments/assets/d9a476c6-076f-4e77-a9ea-424f0ac8f3e6" />
@@ -16,17 +18,17 @@ A single HTML file that inspects X.509 certificates, verifies signed bundle rele
 
 **Report.** One row per certificate: subject, issuer, validity dates, serial number, key and signature algorithms, SHA-1 thumbprint, OCSP and CRL URLs, and certificate type. Expired certificates are flagged in red. The search box highlights matching rows across all columns, including serials and thumbprints. Checkboxes select specific rows for export.
 
-**Export.** Exports include the selected certificates, or all certificates if none are selected, with any duplicates removed automatically if present. Available export formats: a single certificate as DER (.cer), a concatenated PEM bundle suitable for use as a CA file, a DER-encoded PKCS#7 bundle (.p7b), and CSV. A status line under the Report header confirms each export.
+**Export.** Exports include the selected certificates, or all certificates if none are selected, with any duplicates removed automatically if present. Available export formats: a single certificate as DER (.cer), a concatenated PEM bundle suitable for use as a CA file, a DER-encoded PKCS#7 bundle (.p7b), CSV, and a standalone HTML copy of the report. A status line under the Report header confirms each export.
 
 ## Notes
 
-- This tool does not perform revocation status. OCSP and CRL URLs are captured from the certs and simply presented. 
+- This tool does not perform revocation status. OCSP and CRL URLs captured from the certs and presented. 
 - Signed manifests must be in sha256sum, sha384sum, or sha512sum format. Signature files are recognized by the extensions `.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, and `.sig`
-- Folder drag-and-drop is *not* supported for pages opened from disk. Select all the files directly and simply drop them into the tool.
+- Folder drag-and-drop is not supported for pages opened from disk. Select all the files directly and drop them into the tool.
 
 ## Documentation
 
-A user guide is embedded and can be opened from the 'User Guide' button. [USERGUIDE](USERGUIDE.md) contains the same material.
+A user guide is embedded in the tool, opened from the User Guide button. [USERGUIDE](USERGUIDE.md) contains the same material.
 
 ## License
 

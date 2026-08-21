@@ -3,7 +3,7 @@
   =============================================================================
   Certificate Report/Bundle Tool
   =============================================================================
-  Version: v1.1
+  Version: v1.2
   Author: Eric Haupt
   Released under the MIT License.
   https://github.com/hauptem/Certificate-Report-Bundle-Tool
@@ -13,7 +13,7 @@
     Verifies signed bundle manifests (CMS/PKCS#7) and file hashes,
     imports certificates from DER/PEM/P7B - directly or from verified
     bundle files - and produces reports and re-bundled exports
-    (CSV, PEM, P7B, single cert).
+    (CSV, HTML, PEM, P7B, single cert).
 
   =============================================================================
 -->
@@ -32,7 +32,7 @@
   :root{
     --bg:#07090d; --panel:#222d3d; --panel2:#0d1218; --line:#4a5a74;
     --text:#e8edf4; --dim:#a8b3c2; --accent:#c6d8ef;
-    --red:#f28080; --amber:#edb45a; --ok:#7ccb91;
+    --red:#f28080; --amber:#ffc94d; --ok:#7ccb91;
     --mono:Consolas,"Cascadia Mono",ui-monospace,Menlo,monospace;
     --sans:"Segoe UI",system-ui,-apple-system,sans-serif;
   }
@@ -48,6 +48,7 @@
   .cmp-side .zlabel{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
   .cmp-side .zlabel button{padding:2px 9px;font-size:11px;font-weight:400}
   dialog#compare .guide-h .titlebtns button{width:120px;padding-left:0;padding-right:0}
+  dialog#compare .guide-h .titlebtns button#cmpClose{width:92px}
   .cmp-zone{border:2px dashed #3f4c5f;border-radius:3px;background:var(--panel2);padding:18px 10px;text-align:center;color:var(--dim);cursor:pointer;font-size:12.5px}
   .cmp-zone.drag{border-color:var(--accent);color:var(--accent)}
   .cmp-zone .zcount{display:block;margin-top:4px;font-family:var(--mono);font-size:12px;color:var(--text)}
@@ -65,17 +66,17 @@
   #cmpResults tbody tr.row-amber td{background:#faf0cd}
   .cmp-zone.zone-red{border-color:#c05050;border-style:solid}
   .cmp-zone.zone-red .zcount{color:#e08a8a}
-  .cmp-zone.zone-amber{border-color:#c99a2e;border-style:solid}
-  .cmp-zone.zone-amber .zcount{color:#e0b45a}
+  .cmp-zone.zone-amber{border-color:#e6b83a;border-style:solid}
+  .cmp-zone.zone-amber .zcount{color:#ffc94d}
   h1{font-size:17px;font-weight:600;letter-spacing:.03em}
-  dialog#guide{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.7);padding:0;max-width:975px;width:90vw;max-height:85vh;margin:auto;overflow:hidden}
+  dialog#guide{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.7);padding:0;width:75vw;max-width:none;max-height:90vh;margin:auto;overflow:hidden}
   dialog#guide::backdrop{background:rgba(0,0,0,.6)}
   .guide-h{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;background:#2c3849;border-bottom:1px solid var(--line);position:sticky;top:0}
   .guide-h b{font-size:13px;letter-spacing:.08em;text-transform:uppercase}
-  .guide-b{padding:6px 22px 20px;overflow-y:auto;max-height:calc(85vh - 50px);font-size:13.5px;line-height:1.55}
+  .guide-b{padding:6px 22px 20px;overflow-y:auto;max-height:calc(90vh - 50px);font-size:13.5px;line-height:1.55;background:var(--panel2)}
   .guide-b h2{font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin:20px 0 6px;border-bottom:1px solid var(--line);padding-bottom:4px}
   .guide-b p{margin:7px 0}
-  .guide-b ul{margin:6px 0 6px 22px}
+  .guide-b ul,.guide-b ol{margin:6px 0 6px 22px}
   .guide-b li{margin:4px 0}
   .guide-b code{font-family:var(--mono);font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:2px;padding:1px 5px}
 
@@ -86,7 +87,7 @@
   details.panel > summary.panel-h::-webkit-details-marker{display:none}
   details.panel > summary.panel-h::after{content:"\25BE";margin-left:auto;color:var(--text);font-size:20px;line-height:1}
   details.panel[open] > summary.panel-h::after{content:"\25B4"}
-  .step{display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;background:#35598f;border:1px solid #5580bd;border-radius:2px;font-size:11px;flex:none}
+  .step{display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;background:#ffc22e;border:1px solid #ffd763;border-radius:2px;font-size:11px;flex:none;color:#14181f;font-weight:600}
   .panel-sub{font-weight:400;text-transform:none;letter-spacing:0;color:#bcc7d6;font-size:12px}
   .panel-b{padding:14px 16px}
 
@@ -108,18 +109,20 @@
   #exportNotice{display:none;padding:8px 14px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--dim);background:var(--panel)}
 
   .panel-h .count{color:var(--dim);font-size:12px;font-weight:400;text-transform:none;letter-spacing:0}
-  #search{background:var(--panel2);box-shadow:inset 0 2px 6px rgba(0,0,0,.6);border:1px solid var(--line);border-radius:3px;color:var(--text);padding:5px 9px;font-family:var(--sans);font-size:12.5px;font-weight:400;text-transform:none;letter-spacing:0;width:200px}
+  #search{background:var(--panel2);box-shadow:inset 0 2px 6px rgba(0,0,0,.6);border:1px solid var(--line);border-radius:3px;color:var(--text);padding:6px 9px;font-family:var(--sans);font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;width:260px}
   #search:focus{outline:1px solid var(--accent);outline-offset:1px}
   .spacer{flex:1}
   button{background:#445876;border:1px solid #60779c;color:var(--text);border-radius:3px;padding:6px 13px;font-size:12.5px;cursor:pointer;font-family:var(--sans);text-transform:none;letter-spacing:0;font-weight:400;box-shadow:0 1px 3px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08);transition:background .12s,border-color .12s,box-shadow .12s,transform .12s}
   button:hover:not(:disabled){background:#4d6384;border-color:#7590b8;box-shadow:0 2px 5px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.12);transform:translateY(-1px)}
   button:active:not(:disabled){transform:translateY(0);box-shadow:0 1px 2px rgba(0,0,0,.5),inset 0 1px 2px rgba(0,0,0,.25)}
   button.export{background:#2d6642;border-color:#478a63}
-  button.guide{background:#e8a820;border-color:#ffc84a;color:#14181f;font-weight:600}
-  button.guide:hover:not(:disabled){background:#f6b82e;border-color:#ffd670}
+  button.guide{background:#ffc22e;border-color:#ffd763;color:#14181f;font-weight:600}
+  button.guide:hover:not(:disabled){background:#ffd04f;border-color:#ffe28f}
   button.export:hover:not(:disabled){background:#34754d;border-color:#52996f}
   button:disabled{opacity:.4;cursor:default}
   button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  #compareBtn,#guideBtn,#vclear,#clear,#cmpClose,#guideClose{width:92px;padding-left:0;padding-right:0;text-align:center}
+  #exportCer,#exportPem,#exportP7b,#export,#exportHtml{width:150px;padding-left:0;padding-right:0;text-align:center}
 
   .tablewrap{overflow-x:auto;background:#ffffff}
   table{border-collapse:collapse;width:100%;min-width:2050px}
@@ -129,7 +132,7 @@
   td{padding:7px 10px;border-bottom:1px solid #e2e5e9;font-family:var(--mono);font-size:12.5px;vertical-align:top;white-space:nowrap;color:#111417}
   tbody tr:nth-child(even) td{background:#f2f4f7}
   tbody tr.hit td{background:#fbe9a8}
-  tbody tr.hit td:first-child{box-shadow:inset 3px 0 0 #d9a514}
+  tbody tr.hit td:first-child{box-shadow:inset 3px 0 0 #f0b400}
   tr:last-child td{border-bottom:none}
   tr.expired td.exp{color:#c62828;font-weight:700}
   td.exp .flag{font-family:var(--sans);font-size:10px;margin-left:6px}
@@ -160,6 +163,7 @@
   .vhash .vlabel{color:var(--dim)}
   .vhash.vbadval{color:var(--red)}
   #vresults .vimp{padding:3px 9px;min-width:64px;text-align:center;font-size:11px}
+  #vresults .vimp.done{background:#2d6642;border-color:#478a63;opacity:1}
   #vresults .tablewrap{margin-top:10px}
   #vresults table{min-width:1150px}
   #vresults td.vimpcol{width:84px;padding-top:5px;padding-bottom:5px}
@@ -181,10 +185,10 @@
 </div>
 
 <details class="panel" open>
-  <summary class="panel-h"><span class="step">1</span> Verify <span class="panel-sub">optional - checks signature and file hashes</span><span class="spacer"></span><button id="vclear" type="button" title="Reset for another bundle">Clear</button></summary>
+  <summary class="panel-h"><span class="step">1</span> Verify<span class="spacer"></span><button id="vclear" type="button" title="Reset for another bundle">Clear</button></summary>
   <div class="panel-b">
     <div id="vdrop" class="dropzone" role="button" tabindex="0" aria-label="Drop verification files">
-      Drop the bundle's .sha256 file, the CA chain .pem, and the bundle files &mdash; or click to browse
+      Drop the bundle's .sha256 file, the CA chain .pem, and the bundle files, or click to browse
       <input id="vfile" type="file" multiple>
     </div>
     <div id="vresults" class="vdim">No verification files loaded.</div>
@@ -196,37 +200,38 @@
   <div class="panel-b">
     <div class="batch">
       <div class="field">
-        <label for="bCat">Category <span class="opt">optional</span></label>
-        <input id="bCat" type="text" placeholder="e.g. Internal" size="10" autocomplete="off">
+        <label for="bCat">Category</label>
+        <input id="bCat" type="text" placeholder="e.g. Internal" size="10" autocomplete="off" title="Report column label applied to every certificate in the drop. Fills automatically from recognized bundle filenames when left blank.">
       </div>
       <div class="field">
-        <label for="bVer">Version <span class="opt">optional</span></label>
-        <input id="bVer" type="text" placeholder="e.g. v1.0" size="9">
+        <label for="bVer">Version</label>
+        <input id="bVer" type="text" placeholder="e.g. v1.0" size="9" title="Report column label applied to every certificate in the drop. Fills automatically from recognized bundle filenames when left blank.">
       </div>
       <div class="field">
-        <label for="bRel">Release Date <span class="opt">optional</span></label>
-        <input id="bRel" type="text" placeholder="e.g. 1/15/2026" size="12">
+        <label for="bRel">Release Date</label>
+        <input id="bRel" type="text" placeholder="e.g. 1/15/2026" size="12" title="Report column label applied to every certificate in the drop.">
       </div>
     </div>
     <div id="drop" class="dropzone" role="button" tabindex="0" aria-label="Drop certificate files or click to browse">
-      Drop certificate files or bundles here (.cer / .crt / .pem / .der / .p7b) &mdash; or click to browse
+      Drop certificate files or bundles here (.cer / .crt / .pem / .der / .p7b), or click to browse
       <input id="file" type="file" multiple accept=".cer,.crt,.pem,.der,.p7b,.p7c,.txt">
     </div>
     <div id="errors"></div>
   </div>
 </details>
 
-<section class="panel">
-  <div class="panel-h"><span class="step">3</span> Report
+<details class="panel" open>
+  <summary class="panel-h" id="reportHead"><span class="step">3</span> Report
     <input id="search" type="search" placeholder="Search certificates" autocomplete="off">
     <span class="count" id="count">0 certificates</span>
     <span class="spacer"></span>
-    <button id="clear" title="Clear all">Clear all</button>
     <button id="exportCer" class="export" disabled>Export .cer</button>
     <button id="exportPem" class="export" disabled title="Export one or more certs in a single PEM file">Export PEM bundle</button>
     <button id="exportP7b" class="export" disabled title="Export one or more certs in a single P7B file">Export P7B bundle</button>
     <button id="export" class="export" disabled title="Export table to a .csv file">Export CSV</button>
-  </div>
+    <button id="exportHtml" class="export" disabled title="Export the report as a standalone HTML page">Export HTML</button>
+    <button id="clear" title="Clear all certificates from the report">Clear</button>
+  </summary>
   <div id="exportNotice"></div>
   <div class="tablewrap">
     <table>
@@ -256,7 +261,7 @@
       </tbody>
     </table>
   </div>
-</section>
+</details>
 
 <dialog id="compare" aria-labelledby="cmpTitle">
   <div class="guide-h">
@@ -290,53 +295,42 @@
     <button id="guideClose" title="Close">Close</button>
   </div>
   <div class="guide-b">
-    <p>This tool inspects X.509 certificates, verifies signed bundle releases, and exports certificate bundles. It has three sections: Verify, Import, and Report.</p>
+    <p>The tool has three sections: Verify checks a signed release, Import reads certificates into the report, and Report displays and exports them.</p>
 
     <h2>Verify</h2>
-    <p>Use this section to check a signed release before trusting it. Drop the signature file, the CA chain file if one was provided, and the bundle files. The tool verifies the signature on the manifest, validates the signer's certificate chain, and compares each file's hash against the signed manifest. Results are shown as a table listing each file's status, manifest hash, and computed hash, with certificate files listed first.</p>
-    <p>The chain is verified up to a self-signed root. Because the root arrives in the same download, the tool displays its fingerprint rather than trusting it. Compare the fingerprint against the value published by the issuing authority.</p>
-    <p>Red results indicate the bundle cannot be trusted: an invalid signature, altered content, a broken chain, a non-CA certificate used as an issuer, or a file hash mismatch. Amber results indicate a warning, such as a missing chain file or an expired certificate.</p>
-    <p>A file that was renamed after download is matched to its manifest entry by content hash and reported accordingly. For detached signatures, include the manifest file in the drop.</p>
-    <p>Files containing certificates show an Import button in the results, and an Import all button appears when several are present. These add the file's certificates to the report directly, using the same batch fields, filename-derived metadata, and duplicate skipping as the import drop zone, so verified bundles do not need a second drop.</p>
-    <p>Recognized signature extensions are <code>.sha256</code>, <code>.sha384</code>, <code>.sha512</code>, <code>.p7s</code>, <code>.p7m</code>, and <code>.sig</code>. Manifests must be in sha256sum, sha384sum, or sha512sum format. Supported signature algorithms are RSA PKCS#1 v1.5, RSA-PSS, and ECDSA on P-256, P-384, and P-521.</p>
-
-    <h2>Compare Bundles</h2>
-    <p>The Compare button opens a two-sided comparison. Drop certificates or bundles on the Reference and Comparison sides. Either side accepts the same formats as import, across multiple files. Results appear once both sides hold certificates.</p>
-    <p>Differences are shown as a table with the same fields as the report. A certificate present in the reference but not the comparison is marked MISSING IN COMPARISON BUNDLE in red; the reverse is marked MISSING IN REFERENCE BUNDLE in amber. A certificate with the same subject but different content is marked CHANGED, with one row per version. Matching uses the full subject rather than the common name. The Comparison drop zone is outlined red when entries are missing from it and amber when it only differs.</p>
-    <p>Certificates present in both sets are summarized as a count. The Show all button adds them to the table as IN BOTH rows.</p>
+    <p>To verify a release, drop all of its files into the zone: the signature file, the chain file if there is one, and the bundle files. The tool checks the manifest signature, builds the signer's chain, and compares every file against the signed manifest. Problems are marked in red, warnings in amber, and each file row shows the manifest hash next to the computed one.</p>
+    <p>The tool never trusts the root certificate, since it came in the same download. It shows the root's fingerprints instead. Compare one of them against the value the issuing authority publishes, and the release is verified once that matches and everything else is clean.</p>
+    <p>Use the Import buttons in the results to send a verified file's certificates to the report without dropping it again.</p>
+    <p>Signature files are recognized by their extension (<code>.sha256</code>, <code>.sha384</code>, <code>.sha512</code>, <code>.p7s</code>, <code>.p7m</code>, <code>.sig</code>), and the manifest must be sha256sum, sha384sum, or sha512sum output. Attached and detached signatures both work, with RSA PKCS#1 v1.5, RSA-PSS, or ECDSA on P-256, P-384, or P-521.</p>
 
     <h2>Import</h2>
-    <p>Drop certificate files to add them to the report. Supported formats are DER, PEM, headerless Base64, and PKCS#7 bundles. Bundles expand to one row per certificate, and each row is named by the certificate's subject CN. A certificate already in the report is skipped rather than added again, so dropping the same bundle in multiple encodings does not create duplicate rows; a notice above the table shows the skipped count. Files that fail to parse are listed above the table without affecting the rest of the drop.</p>
-    <p>The Category, Version, and Release Date fields are optional and populate the corresponding report columns for each drop. When Category or Version is blank, filenames following the <code>certificates_pkcs7_v5_14_dod</code> convention fill them automatically; values you type take precedence.</p>
+    <p>Drop certificate files into the zone. DER, PEM, headerless Base64, and PKCS#7 bundles are all accepted, and bundles expand to one row per certificate. Certificates already in the report are skipped, so the same bundle in two encodings won't create duplicates.</p>
+    <p>Fill in Category, Version, or Release Date before dropping to label everything in that drop. Filenames like <code>certificates_pkcs7_v2_1_internal</code> fill Category and Version automatically when you leave them blank.</p>
 
     <h2>Report</h2>
-    <p>Each certificate appears as one row showing its subject, issuer, validity dates, serial number, key and signature algorithms, SHA-1 thumbprint, revocation URLs, and certificate type. Expired certificates are flagged in red. Click the Certificate Name or Expiration header to sort.</p>
-    <p>The search box highlights matching rows across all columns, including serials and thumbprints, without hiding the other rows. Use the checkboxes to select rows for export.</p>
+    <p>Each certificate is a row showing its subject, issuer, validity, serial, algorithms, thumbprint, revocation URLs, and type, with expired and not-yet-valid certificates flagged. Sort by clicking the Certificate Name or Expiration header, and use the search box to highlight matches anywhere in the table. Check rows to select them for export, or remove them individually with the button at the end of each row.</p>
 
-    <h2>Exports</h2>
-    <p>Exports include the selected certificates, or all certificates if none are selected. Duplicate certificates are removed automatically. Each export prompts for the filename, with a default supplied.</p>
-    <ul>
-      <li>Export .cer writes a single certificate as DER, named after the certificate. Available when exactly one certificate is in scope</li>
-      <li>Export PEM bundle writes a concatenated PEM file suitable for use as a CA file</li>
-      <li>Export P7B bundle writes a DER-encoded PKCS#7 bundle</li>
-      <li>Export CSV writes the report table, including SHA-256 thumbprints</li>
-    </ul>
+    <h2>Compare</h2>
+    <p>Compare, in the title bar, diffs two certificate sets. Drop the baseline on the Reference side and the set you're evaluating on the Comparison side; differences appear as a table once both sides have certificates. Matching uses the full subject, so same-named certificates from different organizations aren't confused.</p>
+
+    <h2>Export</h2>
+    <p>Exports cover the checked rows, or the whole report if nothing is checked, with duplicates removed. Use PEM for an openssl-style CA file, P7B for Windows and Java trust stores, .cer for a single certificate as DER, CSV for a spreadsheet copy of the report with SHA-256 thumbprints added, and HTML for a standalone copy of the report you can share, archive, or print.</p>
 
     <h2>Notes</h2>
     <ul>
-      <li>Revocation status is not checked. OCSP and CRL URLs are reported for use with external tools</li>
-      <li>Windows may block downloaded .cer files. Right-click the file, open Properties, and select Unblock</li>
+      <li>The tool doesn't check revocation. The OCSP and CRL URLs in the report are for use with external tools</li>
+      <li>Windows may block a downloaded .cer file. Right-click it, open Properties, and select Unblock</li>
     </ul>
 
     <h2>Troubleshooting</h2>
     <ul>
-      <li>If a signature file is not recognized, rename it to one of the recognized extensions. The signature covers the file content, so renaming does not affect verification</li>
-      <li>If a detached signature reports that no files match, include the manifest file in the drop</li>
-      <li>If the signer certificate is not found, drop the publisher's chain file. The signature file does not embed the signer's certificate</li>
-      <li>If the chain is incomplete, drop the missing issuer. Certificates from any dropped file are used for chain building</li>
-      <li>A file reported as skipped matches nothing in the manifest by name or content. This is expected for chain files and documentation included in a release</li>
-      <li>Folder drag-and-drop is not supported for pages opened from disk. Select the files directly</li>
-      <li>If fewer rows appear than expected, check the notices above the table for files that failed to parse</li>
+      <li>The signature file isn't recognized: rename it to one of the recognized extensions. The signature covers the file's content, so the name doesn't affect verification</li>
+      <li>A detached signature reports that no files match: include the manifest file itself in the drop</li>
+      <li>The signer certificate isn't found: drop the publisher's chain file. The signature file doesn't embed the signer's certificate</li>
+      <li>The chain is incomplete: drop the missing issuer certificate. Certificates from every dropped file are used for chain building</li>
+      <li>A file shows as skipped: nothing in the manifest matches it by name or content. This is normal for chain files and documentation</li>
+      <li>Folder drag-and-drop doesn't work when the page is opened from disk: select the files inside the folder instead</li>
+      <li>Fewer rows appear than expected: check the notices above the Import drop zone for files that failed to parse</li>
     </ul>
   </div>
 </dialog>
@@ -1324,6 +1318,7 @@ function render(){
   selAll.checked = rows.length > 0 && selected.size === rows.length;
   selAll.indeterminate = selected.size > 0 && selected.size < rows.length;
   document.getElementById("export").disabled = !rows.length;
+  document.getElementById("exportHtml").disabled = !rows.length;
   document.getElementById("exportPem").disabled = !rows.length;
   document.getElementById("exportP7b").disabled = !rows.length;
   const single = (selected.size || rows.length) === 1;
@@ -1385,7 +1380,7 @@ async function importBuffer(buf, filename, have){
 /** Import notices shown above the report-bound drop zone. */
 function importNotices(errs, dupes){
   const notices = errs.map(e=>'<div class="err">\u26A0 '+esc(e)+'</div>');
-  if (dupes) notices.push('<div class="err" style="color:var(--dim)">'+dupes+' duplicate certificate(s) skipped (already in the report)</div>');
+  if (dupes) notices.push('<div class="err" style="color:var(--amber)">\u26A0 '+dupes+' duplicate certificate(s) skipped (already in the report)</div>');
   if (notices.length){
     errBox.style.display = "block";
     errBox.innerHTML = notices.join("");
@@ -1425,6 +1420,23 @@ fileInput.addEventListener("change", e=>{ handleFiles([...e.target.files]); file
 ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.add("over"); }));
 ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.remove("over"); }));
 drop.addEventListener("drop", e=>handleFiles(e.dataTransfer.files));
+
+// Buttons and the search box live inside the Report summary; their
+// clicks must act without collapsing the panel.
+document.getElementById("reportHead").addEventListener("click", e=>{
+  if (e.target.closest && e.target.closest("button,input")) e.preventDefault();
+});
+// Space and Enter in the search box would toggle the summary: the
+// toggle is a default action of the key event itself, so stopping
+// propagation is not enough and it must be prevented. Space inserts
+// its character on keydown, so preventing the keyup default leaves
+// typing intact; Enter has no useful default in this input.
+document.getElementById("search").addEventListener("keyup", e=>{
+  if (e.key === " ") e.preventDefault();
+});
+document.getElementById("search").addEventListener("keydown", e=>{
+  if (e.key === "Enter") e.preventDefault();
+});
 
 document.getElementById("tbody").addEventListener("click", e=>{
   if (e.target.classList.contains("del")){
@@ -1496,15 +1508,88 @@ document.getElementById("export").addEventListener("click", async ()=>{
   if (name) exportNotice("CSV exported: "+name+" - "+uc.certs.length+" certificate(s)"+(uc.selectedOnly?" (selected only)":"")+(uc.duplicates?", "+uc.duplicates+" duplicate(s) removed":""));
 });
 
+/* HTML report export: a standalone page in the tool's own visual
+   style. The styling below mirrors the design tokens and table rules
+   from this file's stylesheet; the export has no dependencies. */
+document.getElementById("exportHtml").addEventListener("click", async ()=>{
+  const uc = uniqueCerts();
+  const now = new Date();
+  const trs = uc.certs.map(r=>{
+    const expired = r.notAfter < now;
+    const notYet = r.notBefore > now;
+    return '<tr'+(expired?' class="expired"':'')+'>' +
+      '<td>'+(r.cat ? '<span class="'+chipClass(r.cat)+'">'+esc(r.cat)+'</span>' : '')+'</td>' +
+      '<td>'+esc(r.name)+'</td>' +
+      '<td>'+esc(r.ver)+'</td>' +
+      '<td>'+esc(r.rel)+'</td>' +
+      '<td>'+esc(r.org)+'</td>' +
+      '<td>CN = '+esc(r.issuerCN)+'</td>' +
+      '<td>'+fmtDate(r.notBefore)+(notYet?' <span class="flag nyv">NOT YET VALID</span>':'')+'</td>' +
+      '<td class="exp">'+fmtDate(r.notAfter)+(expired?' <span class="flag">EXPIRED</span>':'')+'</td>' +
+      '<td class="mono-sm">'+esc(r.serial)+'</td>' +
+      '<td>'+esc(r.key)+'</td>' +
+      '<td>'+esc(r.sigAlg)+'</td>' +
+      '<td class="mono-sm">'+esc(r.thumb1)+'</td>' +
+      '<td class="mono-sm">'+esc(r.thumb256)+'</td>' +
+      '<td>'+(r.ocsp?esc(r.ocsp):'<span class="na">N/A</span>')+'</td>' +
+      '<td>'+(r.crl?esc(r.crl):'<span class="na">N/A</span>')+'</td>' +
+      '<td>'+esc(certType(r))+'</td>' +
+    '</tr>';
+  }).join("");
+  const doc = '<!DOCTYPE html>\n' +
+    '<!--\n' +
+    '  =============================================================================\n' +
+    '  This report was generated by the Certificate Report/Bundle Tool\n' +
+    '  https://github.com/hauptem/Certificate-Report-Bundle-Tool\n' +
+    '  =============================================================================\n' +
+    '-->\n' +
+    '<html lang="en"><head><meta charset="UTF-8">' +
+    '<title>Certificate Report</title>\n<style>\n' +
+    ':root{--bg:#07090d;--text:#e8edf4;--dim:#a8b3c2;' +
+    '--mono:Consolas,"Cascadia Mono",ui-monospace,Menlo,monospace;--sans:"Segoe UI",system-ui,-apple-system,sans-serif}\n' +
+    'body{background:#ffffff;color:#111417;font-family:var(--sans);font-size:14px;min-height:100vh;width:max-content;min-width:100%}\n' +
+    '.head{background:linear-gradient(180deg,#0b0e14 0%,var(--bg) 100%);color:var(--text);padding:20px 24px 16px}\n' +
+    '*{box-sizing:border-box;margin:0;padding:0}\n' +
+    'h1{font-size:17px;font-weight:600;letter-spacing:.03em;margin-bottom:4px}\n' +
+    '.meta{color:var(--dim);font-size:12.5px}\n' +
+    '.tablewrap{background:#ffffff}\n' +
+    'table{border-collapse:collapse;width:100%;min-width:2050px}\n' +
+    'th{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#3c434d;text-align:left;padding:9px 10px;border-bottom:1px solid #c8ccd2;white-space:nowrap;background:#eef0f3;position:sticky;top:0}\n' +
+    'td{padding:7px 10px;border-bottom:1px solid #e2e5e9;font-family:var(--mono);font-size:12.5px;vertical-align:top;white-space:nowrap;color:#111417}\n' +
+    'tbody tr:nth-child(even) td{background:#f2f4f7}\n' +
+    'tr:last-child td{border-bottom:none}\n' +
+    'tr.expired td.exp{color:#c62828;font-weight:700}\n' +
+    'td.exp .flag{font-family:var(--sans);font-size:10px;margin-left:6px}\n' +
+    'td .flag.nyv{font-family:var(--sans);font-size:10px;margin-left:6px;color:#a15c00;font-weight:700}\n' +
+    '.chip{display:inline-block;padding:2px 9px;border-radius:2px;font-family:var(--sans);font-size:11.5px;font-weight:600;color:#fff;background:#4a5462}\n' +
+    '.chip.c0{background:#3f5c25}.chip.c1{background:#a07908}.chip.c2{background:#1f5faf}' +
+    '.chip.c3{background:#6b4fa0}.chip.c4{background:#8a3f3f}.chip.c5{background:#2e6e6a}\n' +
+    '.na{color:#5c6572}\n' +
+    'td.mono-sm{font-size:10.5px;letter-spacing:.01em}\n' +
+    '@media print{.head{background:#fff;color:#111417;padding:0 0 12px}.head .meta{color:#5c6572}}\n' +
+    '</style></head><body>\n' +
+    '<div class="head"><h1>CERTIFICATE REPORT</h1>\n' +
+    '<div class="meta">Generated '+fmtDate(now)+' \u00B7 '+uc.certs.length+' certificate(s)'+(uc.selectedOnly?' (selected only)':'')+'</div></div>\n' +
+    '<div class="tablewrap"><table><thead><tr>' +
+    '<th>Category</th><th>Certificate Name</th><th>Version</th><th>Release</th><th>Organization</th>' +
+    '<th>Issuer Common Name</th><th>Not Before</th><th>Expiration</th><th>Serial</th><th>Key</th>' +
+    '<th>Signature Alg</th><th>Thumbprint (SHA-1)</th><th>Thumbprint (SHA-256)</th>' +
+    '<th>OCSP URL</th><th>CRL URL</th><th>Certificate Type</th>' +
+    '</tr></thead><tbody>'+trs+'</tbody></table></div>\n</body></html>\n';
+  const name = await saveBlob(doc, "text/html;charset=utf-8", "cert_report_"+stamp()+".html");
+  if (name) exportNotice("HTML report exported: "+name+" - "+uc.certs.length+" certificate(s)"+(uc.selectedOnly?" (selected only)":"")+(uc.duplicates?", "+uc.duplicates+" duplicate(s) removed":""));
+});
+
 /* ======================================================================
    SECTION 7. EXPORTS
    All exports operate on the selected rows when a selection exists,
    otherwise on every row, with byte-identical duplicates removed.
-   Four outputs: a single certificate as raw DER (.cer, available only
+   Five outputs: a single certificate as raw DER (.cer, available only
    when exactly one certificate is in scope), a concatenated PEM bundle
    (a single certificate in scope produces a bare single-certificate
-   PEM), a degenerate PKCS#7 bundle (.p7b), and CSV. Every export
-   prompts for the output filename with a default supplied.
+   PEM), a degenerate PKCS#7 bundle (.p7b), CSV, and a standalone HTML
+   report page. Every export prompts for the output filename with a
+   default supplied.
    ====================================================================== */
 
 /** Rows the exports operate on: the selection, or all rows if none. */
@@ -1911,16 +1996,14 @@ async function vImportFiles(names){
 vResults.addEventListener("click", async e=>{
   const btn = e.target.closest ? e.target.closest(".vimp") : null;
   if (!btn || btn.disabled) return;
-  const all = btn.dataset.name === "*";
-  const names = all ? [...vState.importable] : [btn.dataset.name];
-  const label = btn.textContent;
+  const names = btn.dataset.name === "*" ? [...vState.importable] : [btn.dataset.name];
   btn.disabled = true;
-  const { added, dupes } = await vImportFiles(names);
-  btn.textContent = added ? "Imported ("+added+")" : (dupes ? "Already imported" : "No certificates");
-  // Feedback is transient; the button is restored and re-enabled so
-  // the file can be imported again after the report is cleared or
-  // rows are removed.
-  setTimeout(()=>{ btn.textContent = label; btn.disabled = false; }, 2500);
+  await vImportFiles(names);
+  // Feedback is a brief color change only; the label never changes, so
+  // the table layout never shifts. Counts appear in the import notice
+  // area, and the button re-enables for use after a report clear.
+  btn.classList.add("done");
+  setTimeout(()=>{ btn.classList.remove("done"); btn.disabled = false; }, 1500);
 });
 
 const vclear = document.getElementById("vclear");
