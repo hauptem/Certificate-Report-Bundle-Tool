@@ -1,16 +1,18 @@
 # Certificate Report/Bundle Tool - User Guide
 
-Open `Certificate Report Bundle Tool.html` in a browser. The tool has three sections: Verify Bundle, Import Certificates, and Report. They work independently.
+Open `Certificate Report Bundle Tool.html` in a browser, either directly from disk (`file://`) or over HTTPS; WebCrypto is unavailable over plain HTTP and the tool reports this at startup. The tool has three sections: Verify Bundle, Import Certificates, and Report. They work independently.
 
 ## Verify Bundle
 
-Use this section to check a signed release before trusting it. Drop the signature file, the CA chain file if one was provided, and the bundle files. The tool verifies the signature on the manifest, validates the signer's certificate chain, and compares each file's hash against the signed manifest. Both hash values are displayed for each file.
+Use this section to check a signed release before trusting it. Drop the signature file, the CA chain file if one was provided, and the bundle files. The tool verifies the signature on the manifest, validates the signer's certificate chain, and compares each file's hash against the signed manifest. Results are shown as a table listing each file's status, manifest hash, and computed hash, with certificate files listed first.
 
-The chain is verified up to a self-signed root. Because the root arrives in the same download, the tool displays its fingerprint rather than trusting it. Compare the fingerprint against the value published by the issuing authority.
+The chain is verified up to a self-signed root. Every link in the chain must be a CA certificate (Basic Constraints), so an end-entity certificate cannot be used as an issuer. Because the root arrives in the same download, the tool displays its fingerprint rather than trusting it. Compare the fingerprint against the value published by the issuing authority.
 
-Red results indicate the bundle cannot be trusted: an invalid signature, altered content, a broken chain, or a file hash mismatch. Amber results indicate a correctable problem, such as a missing chain file.
+Red results indicate the bundle cannot be trusted: an invalid signature, altered content, a broken chain, a non-CA certificate used as an issuer, or a file hash mismatch. Amber results indicate a warning, such as a missing chain file or an expired certificate.
 
 A file that was renamed after download is matched to its manifest entry by content hash and reported accordingly. For detached signatures, include the manifest file in the drop.
+
+Files containing certificates show an Import button in the results, and an Import all button appears when several are present. These add the file's certificates to the report directly, using the same batch fields, filename-derived metadata, and duplicate skipping as the import drop zone, so verified bundles do not need a second drop.
 
 Recognized signature extensions are `.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, and `.sig`. Manifests must be in sha256sum, sha384sum, or sha512sum format. Supported signature algorithms are RSA PKCS#1 v1.5, RSA-PSS, and ECDSA on P-256, P-384, and P-521.
 
@@ -26,7 +28,7 @@ Certificates present in both sets are summarized as a count. The Show all button
 
 ## Import Certificates
 
-Drop certificate files to add them to the report. Supported formats are DER, PEM, headerless Base64, and PKCS#7 bundles. Bundles expand to one row per certificate, and each row is named by the certificate's subject CN. Files that fail to parse are listed above the table without affecting the rest of the drop.
+Drop certificate files to add them to the report. Supported formats are DER, PEM, headerless Base64, and PKCS#7 bundles. Bundles expand to one row per certificate, and each row is named by the certificate's subject CN. A certificate already in the report is skipped rather than added again, so dropping the same bundle in multiple encodings does not create duplicate rows; a notice above the table shows the skipped count. Files that fail to parse are listed above the table without affecting the rest of the drop.
 
 The Category, Version, and Release Date fields are optional and populate the corresponding report columns for each drop. When Category or Version is blank, filenames following the `certificates_pkcs7_v5_14_dod` convention fill them automatically; values you type take precedence.
 
@@ -38,7 +40,7 @@ The search box highlights matching rows across all columns, including serials an
 
 ## Exports
 
-Exports include the selected certificates, or all certificates if none are selected. Duplicate certificates are removed automatically. Each export prompts for the filename, with a default supplied.
+Exports include the selected certificates, or all certificates if none are selected. Duplicate certificates are removed automatically. Each export prompts for the filename, with a default supplied, and a status line under the Report header confirms the result.
 
 - Export .cer writes a single certificate as DER, named after the certificate. Available when exactly one certificate is in scope
 - Export PEM bundle writes a concatenated PEM file suitable for use as a CA file
