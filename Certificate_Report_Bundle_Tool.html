@@ -1252,7 +1252,7 @@ function render(){
       const flag = expired ? '<span class="flag">EXPIRED</span>' : "";
       return '<tr class="'+trClass+'">' +
         '<td class="selcol"><input type="checkbox" class="sel" data-id="'+r.id+'"'+(selected.has(r.id)?' checked':'')+' aria-label="Select row"></td>' +
-        '<td><span class="'+chipClass(r.cat)+'">'+esc(r.cat||"-")+'</span></td>' +
+        '<td>'+(r.cat ? '<span class="'+chipClass(r.cat)+'">'+esc(r.cat)+'</span>' : '')+'</td>' +
         '<td>'+esc(r.name)+'</td>' +
         '<td>'+esc(r.ver)+'</td>' +
         '<td>'+esc(r.rel)+'</td>' +
