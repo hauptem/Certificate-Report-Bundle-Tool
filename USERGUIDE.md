@@ -1,6 +1,6 @@
 # Certificate Report/Bundle Tool - User Guide
 
-Open `Certificate Report Bundle Tool.html` in a browser, either directly from disk (`file://`) or over HTTPS; WebCrypto is unavailable over plain HTTP and the tool reports this at startup. The tool has three sections: Verify Bundle, Import Certificates, and Report. They work independently.
+Open `Certificate Report Bundle Tool.html` in a modern browser. The tool has three sections: Verify Bundle, Import Certificates, and Report. They work independently.
 
 ## Verify Bundle
 
