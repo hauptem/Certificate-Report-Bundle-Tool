@@ -133,6 +133,7 @@
   tr:last-child td{border-bottom:none}
   tr.expired td.exp{color:#c62828;font-weight:700}
   td.exp .flag{font-family:var(--sans);font-size:10px;margin-left:6px}
+  td .flag.nyv{font-family:var(--sans);font-size:10px;margin-left:6px;color:#a15c00;font-weight:700}
   .chip{display:inline-block;padding:2px 9px;border-radius:2px;font-family:var(--sans);font-size:11.5px;font-weight:600;color:#fff;background:#4a5462}
   .chip.c0{background:#3f5c25}.chip.c1{background:#a07908}.chip.c2{background:#1f5faf}
   .chip.c3{background:#6b4fa0}.chip.c4{background:#8a3f3f}.chip.c5{background:#2e6e6a}
@@ -295,7 +296,8 @@
     <p>Use this section to check a signed release before trusting it. Drop the signature file, the CA chain file if one was provided, and the bundle files. The tool verifies the signature on the manifest, validates the signer's certificate chain, and compares each file's hash against the signed manifest. Results are shown as a table listing each file's status, manifest hash, and computed hash, with certificate files listed first.</p>
     <p>The chain is verified up to a self-signed root. Because the root arrives in the same download, the tool displays its fingerprint rather than trusting it. Compare the fingerprint against the value published by the issuing authority.</p>
     <p>Red results indicate the bundle cannot be trusted: an invalid signature, altered content, a broken chain, a non-CA certificate used as an issuer, or a file hash mismatch. Amber results indicate a warning, such as a missing chain file or an expired certificate.</p>
-    <p>A file that was renamed after download is matched to its manifest entry by content hash and reported accordingly. For detached signatures, include the manifest file in the drop.</p>\n    <p>Files containing certificates show an Import button in the results, and an Import all button appears when several are present. These add the file's certificates to the report directly, using the same batch fields, filename-derived metadata, and duplicate skipping as the import drop zone, so verified bundles do not need a second drop.</p>
+    <p>A file that was renamed after download is matched to its manifest entry by content hash and reported accordingly. For detached signatures, include the manifest file in the drop.</p>
+    <p>Files containing certificates show an Import button in the results, and an Import all button appears when several are present. These add the file's certificates to the report directly, using the same batch fields, filename-derived metadata, and duplicate skipping as the import drop zone, so verified bundles do not need a second drop.</p>
     <p>Recognized signature extensions are <code>.sha256</code>, <code>.sha384</code>, <code>.sha512</code>, <code>.p7s</code>, <code>.p7m</code>, and <code>.sig</code>. Manifests must be in sha256sum, sha384sum, or sha512sum format. Supported signature algorithms are RSA PKCS#1 v1.5, RSA-PSS, and ECDSA on P-256, P-384, and P-521.</p>
 
     <h2>Compare Bundles</h2>
@@ -341,6 +343,11 @@
 
 <script>
 "use strict";
+
+/* A drop landing outside every drop zone would otherwise navigate the
+   page to the dropped file and discard all loaded state. */
+document.addEventListener("dragover", e=>e.preventDefault());
+document.addEventListener("drop", e=>e.preventDefault());
 
 /* WebCrypto requires a secure context (https:// or file://). Opened
    over plain http://, every hash and signature operation would fail
@@ -449,8 +456,7 @@ function decodeString(b, node){
     for (let i=0;i+1<c.length;i+=2) s += String.fromCharCode((c[i]<<8)|c[i+1]);
     return s;
   }
-  try { return new TextDecoder("utf-8",{fatal:false}).decode(c); }
-  catch(e){ let s=""; for (const x of c) s += String.fromCharCode(x); return s; }
+  return new TextDecoder("utf-8",{fatal:false}).decode(c);
 }
 
 /**
@@ -493,7 +499,8 @@ const OID_CN="2.5.4.3", OID_O="2.5.4.10",
       OID_BC="2.5.29.19", OID_CRLDP="2.5.29.31", OID_AIA="1.3.6.1.5.5.7.1.1",
       OID_OCSP="1.3.6.1.5.5.7.48.1";
 
-/** Constant-structure byte comparison of two Uint8Arrays. */
+/** Byte-for-byte equality of two Uint8Arrays (not constant-time;
+    timing is irrelevant client-side). */
 function bytesEqual(a,b){
   if (a.length !== b.length) return false;
   for (let i=0;i<a.length;i++) if (a[i]!==b[i]) return false;
@@ -778,6 +785,7 @@ function bundleMeta(filename){
    ====================================================================== */
 
 const OID_MSGDIGEST = "1.2.840.113549.1.9.4";
+const OID_CONTENTTYPE = "1.2.840.113549.1.9.3";
 const DIGEST_OIDS = {
   "1.3.14.3.2.26":"SHA-1",
   "2.16.840.1.101.3.4.2.1":"SHA-256",
@@ -853,7 +861,9 @@ function derSigToRaw(sig, size){
  *   SEQUENCE { [0] hashAlgorithm, [1] maskGenAlgorithm, [2] saltLength }.
  * Defaults per the ASN.1 module: SHA-1 and saltLength 20. The salt
  * length INTEGER may span multiple octets (e.g. 222 for a maximized
- * salt under a 2048-bit key).
+ * salt under a 2048-bit key). WebCrypto derives the MGF1 hash from the
+ * message hash, so a signature with mismatched MGF1 and message hashes
+ * fails verification rather than raising a distinct error.
  */
 function parsePssParams(params){
   let hash = "SHA-1", salt = 20;
@@ -928,7 +938,10 @@ function parseCMS(bytes){
   const rk = children(bytes, root);
   if (!rk.length || rk[0].tag !== 6 || decodeOID(contentOf(bytes, rk[0])) !== OID_SIGNEDDATA)
     throw new Error("Not a CMS SignedData file");
-  const sd = children(bytes, rk.find(k=>k.cls===2 && k.tag===0))[0];
+  const explicit0 = rk.find(k=>k.cls===2 && k.tag===0);
+  if (!explicit0) throw new Error("CMS: missing SignedData content");
+  const sd = children(bytes, explicit0)[0];
+  if (!sd) throw new Error("CMS: empty SignedData content");
   const sk = children(bytes, sd);
   let idx = 0;
   idx++; // CMSVersion
@@ -943,6 +956,7 @@ function parseCMS(bytes){
   // EncapsulatedContentInfo ::= SEQUENCE { eContentType OID,
   //   eContent [0] EXPLICIT OCTET STRING OPTIONAL } (RFC 5652 5.2).
   const ek = children(bytes, encap);
+  const eContentType = ek.length ? decodeOID(contentOf(bytes, ek[0])) : "";
   let eContent = null;
   if (ek.length > 1){
     const wrap = children(bytes, ek[1])[0];
@@ -977,21 +991,24 @@ function parseCMS(bytes){
     sidIssuer = bytesOf(bytes, sc[0]);
     sidSerial = [...contentOf(bytes, sc[1])].map(x=>x.toString(16).padStart(2,"0")).join("");
   }
-  let signedAttrsForVerify = null, msgDigestAttr = null;
+  let signedAttrsForVerify = null, msgDigestAttr = null, contentTypeAttr = null;
   if (signedAttrsNode){
     const raw = bytesOf(bytes, signedAttrsNode).slice();
     raw[0] = 0x31;
     signedAttrsForVerify = raw;
     for (const attr of children(bytes, signedAttrsNode)){
       const ak = children(bytes, attr);
-      if (decodeOID(contentOf(bytes, ak[0])) === OID_MSGDIGEST){
-        const valSet = ak[1];
-        const val = children(bytes, valSet)[0];
+      const attrOID = decodeOID(contentOf(bytes, ak[0]));
+      if (attrOID === OID_MSGDIGEST){
+        const val = children(bytes, ak[1])[0];
         msgDigestAttr = toHex(contentOf(bytes, val));
+      } else if (attrOID === OID_CONTENTTYPE){
+        const val = children(bytes, ak[1])[0];
+        contentTypeAttr = decodeOID(contentOf(bytes, val));
       }
     }
   }
-  return { eContent, certs, digestAlgOID, sigAlgOID, sigAlgParams, sigBytes, sidIssuer, sidSerial, signedAttrsForVerify, msgDigestAttr };
+  return { eContent, eContentType, certs, digestAlgOID, sigAlgOID, sigAlgParams, sigBytes, sidIssuer, sidSerial, signedAttrsForVerify, msgDigestAttr, contentTypeAttr };
 }
 
 /**
@@ -1028,10 +1045,13 @@ function parseManifest(eContent){
  *          contentName: the matched content file for detached mode.
  *
  * Fatal ("bad", pipeline stops): signer not found, unsupported digest,
- * unresolvable detached content, messageDigest mismatch, invalid
- * signature, invalid chain link, non-CA certificate used as an issuer.
- * Non-fatal ("warn"): incomplete chain, expired signer or chain
- * certificate, chain depth cap reached, unparseable manifest.
+ * unresolvable detached content, missing or mismatched content-type
+ * attribute, messageDigest mismatch, invalid signature, invalid chain
+ * link, non-CA certificate used as an issuer, invalid root
+ * self-signature.
+ * Non-fatal ("warn"): incomplete chain, expired or not-yet-valid
+ * signer or chain certificate, chain depth cap reached, unparseable
+ * manifest.
  * Informational ("info" + "fp"): root identity and fingerprints for
  * out-of-band comparison; roots are never implicitly trusted, so this
  * guidance always accompanies a verified chain.
@@ -1049,6 +1069,8 @@ async function verifyCMS(cms, pool, pending){
   out.steps.push(["ok","Signer: "+(signer.subjectCN||"(no CN)")]);
   if (signer.notAfter < new Date())
     out.steps.push(["warn","Signer certificate expired "+signer.notAfter.toISOString().slice(0,10)]);
+  if (signer.notBefore > new Date())
+    out.steps.push(["warn","Signer certificate not yet valid until "+signer.notBefore.toISOString().slice(0,10)]);
 
   const hashName = DIGEST_OIDS[cms.digestAlgOID];
   if (!hashName){ out.steps.push(["bad","Unsupported digest algorithm OID "+cms.digestAlgOID]); return out; }
@@ -1103,9 +1125,19 @@ async function verifyCMS(cms, pool, pending){
   }
 
   // The messageDigest signed attribute must equal the content digest
-  // (RFC 5652 5.4); a mismatch means the content was altered.
+  // (RFC 5652 5.4); a mismatch means the content was altered. When
+  // signed attributes are present, a content-type attribute matching
+  // eContentType is also required (RFC 5652 11.1).
   const contentHash = await digestHex(hashName, eContent);
   if (cms.signedAttrsForVerify){
+    if (!cms.contentTypeAttr){
+      out.steps.push(["bad","signedAttrs missing the content-type attribute (RFC 5652 11.1)"]);
+      return out;
+    }
+    if (cms.eContentType && cms.contentTypeAttr !== cms.eContentType){
+      out.steps.push(["bad","content-type attribute does not match eContentType - structure altered"]);
+      return out;
+    }
     if (cms.msgDigestAttr !== contentHash){
       out.steps.push(["bad","Content digest does not match signed messageDigest attribute - content altered"]);
       return out;
@@ -1143,6 +1175,7 @@ async function verifyCMS(cms, pool, pending){
     catch(e){ out.steps.push(["warn","Chain: "+e.message]); terminated = true; break; }
     if (!ok){ out.steps.push(["bad","Chain signature INVALID: \""+(current.subjectCN||"?")+"\" not properly signed by \""+(issuer.subjectCN||"?")+"\""]); return out; }
     if (issuer.notAfter < now) out.steps.push(["warn","Chain cert expired: "+(issuer.subjectCN||"?")]);
+    if (issuer.notBefore > now) out.steps.push(["warn","Chain cert not yet valid: "+(issuer.subjectCN||"?")]);
     current = issuer;
     path.push(issuer.subjectCN||"?");
   }
@@ -1150,7 +1183,16 @@ async function verifyCMS(cms, pool, pending){
     out.steps.push(["warn","Chain exceeds maximum depth (6) without reaching a self-signed root - possible certificate loop"]);
   }
   if (current.selfSigned){
-    out.steps.push(["ok","Chain verified: "+path.join(" \u2192 ")]);
+    // The root's self-signature is not a trust decision (the
+    // fingerprint comparison is), but verifying it catches a corrupted
+    // or reassembled root certificate.
+    let rootSig = false;
+    try { rootSig = await verifySig(current.spkiBytes, current.sigAlgOID, current.sigAlgParams, current.tbsBytes, current.signature, "SHA-256"); }
+    catch(e){ out.steps.push(["warn","Root self-signature: "+e.message]); rootSig = null; }
+    if (rootSig === false){ out.steps.push(["bad","Root self-signature INVALID: \""+(current.subjectCN||"?")+"\" is corrupted or altered"]); return out; }
+    out.steps.push(["ok", path.length > 1
+      ? "Chain verified: "+path.join(" \u2192 ")
+      : "Signer is self-signed; no chain to verify"]);
     const sha1 = await digestHex("SHA-1", current.raw);
     const sha256 = await digestHex("SHA-256", current.raw);
     out.steps.push(["info","Root of trust: "+(current.subjectCN||"?")+" (self-signed). Confirm its fingerprint against the issuing authority's published value:"]);
@@ -1245,11 +1287,13 @@ function render(){
   } else {
     tb.innerHTML = sorted.map(r=>{
       const expired = r.notAfter < now;
+      const notYet = r.notBefore > now;
       const hay = (r.name+" "+r.org+" "+r.issuerCN+" "+r.cat+" "+r.ver+" "+r.rel+" "+certType(r)+" "+r.ocsp+" "+r.crl+" "+fmtDate(r.notBefore)+" "+fmtDate(r.notAfter)+" "+r.serial+" "+r.key+" "+r.sigAlg+" "+r.thumb1+" "+r.thumb256).toLowerCase();
       const hit = searchQuery && hay.includes(searchQuery);
       if (hit) hits++;
       const trClass = (expired ? "expired" : "") + (hit ? " hit" : "");
       const flag = expired ? '<span class="flag">EXPIRED</span>' : "";
+      const nbFlag = notYet ? '<span class="flag nyv">NOT YET VALID</span>' : "";
       return '<tr class="'+trClass+'">' +
         '<td class="selcol"><input type="checkbox" class="sel" data-id="'+r.id+'"'+(selected.has(r.id)?' checked':'')+' aria-label="Select row"></td>' +
         '<td>'+(r.cat ? '<span class="'+chipClass(r.cat)+'">'+esc(r.cat)+'</span>' : '')+'</td>' +
@@ -1258,7 +1302,7 @@ function render(){
         '<td>'+esc(r.rel)+'</td>' +
         '<td>'+esc(r.org)+'</td>' +
         '<td>CN = '+esc(r.issuerCN)+'</td>' +
-        '<td>'+fmtDate(r.notBefore)+'</td>' +
+        '<td>'+fmtDate(r.notBefore)+nbFlag+'</td>' +
         '<td class="exp">'+fmtDate(r.notAfter)+flag+'</td>' +
         '<td class="mono-sm">'+esc(r.serial)+'</td>' +
         '<td>'+esc(r.key)+'</td>' +
@@ -1311,7 +1355,7 @@ const errBox = document.getElementById("errors");
  * @returns {{added:number, dupes:number}}
  */
 async function importBuffer(buf, filename, have){
-  const cat = document.getElementById("bCat").value;
+  const cat = document.getElementById("bCat").value.trim();
   const ver = document.getElementById("bVer").value.trim();
   const rel = document.getElementById("bRel").value.trim();
   const meta = bundleMeta(filename);
@@ -1485,11 +1529,8 @@ function uniqueCerts(){
   const sorted = [...src].sort((a,b)=>a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
   for (const r of sorted){
     if (!r.raw) continue;
-    let key = "";
-    for (let i=0;i<r.raw.length;i+=4096) key += String.fromCharCode.apply(null, r.raw.subarray(i, i+4096));
-    key = btoa(key);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (seen.has(r.thumb256)) continue;
+    seen.add(r.thumb256);
     out.push(r);
   }
   return { certs: out, duplicates: src.length - out.length, selectedOnly: selected.size > 0 };
@@ -1797,6 +1838,10 @@ async function vHandleFiles(fileList){
     const buf = await f.arrayBuffer();
     let bytes = new Uint8Array(buf);
     if (/\.(sha256|sha384|sha512|p7s|p7m|sig)$/i.test(f.name)){
+      // A new signature may carry a manifest with a different digest
+      // algorithm; cached hashes are per-entry-algorithm, so a replaced
+      // manifest invalidates all of them.
+      vState.fileHashes.clear();
       try {
         if (bytes[0] !== 0x30){
           const text = new TextDecoder().decode(bytes);
@@ -1818,7 +1863,9 @@ async function vHandleFiles(fileList){
     vState.pending.set(f.name, new Uint8Array(buf));
     try {
       for (const item of extractCertBuffers(buf, f.name)){
-        vState.pool.push(parseCertificate(item.bytes));
+        const c = parseCertificate(item.bytes);
+        // Re-dropped files would otherwise accumulate duplicates.
+        if (!vState.pool.some(p=>bytesEqual(p.raw, c.raw))) vState.pool.push(c);
       }
       vState.importable.add(f.name);
     } catch(e){ /* Non-certificate files participate in hashing only. */ }
