@@ -10,15 +10,15 @@ Usage: Open `Certificate Report Bundle Tool.html` in a modern browser.
 
 ## Capabilities
 
-**Verify.** This checks a signed release against a manifest file to ensure integrity. The tool verifies the signature on the publisher's hash manifest, validates the signer's certificate chain to a self-signed root, and compares each bundle file's hash against the signed manifest. Chain links are required to be CA certificates (Basic Constraints), so an end-entity certificate cannot be used as an issuer. Results are shown as a table listing each file's status, manifest hash, and computed hash. The root's fingerprint is displayed for comparison against the issuing authority's published value. Attached and detached CMS signatures are supported, with RSA PKCS#1 v1.5, RSA-PSS, and ECDSA (P-256/P-384/P-521). Files containing certificates carry an Import button in the results, so a verified bundle can be added to the report without a second drop.
+**Verify.** This checks a signed release against a manifest file to ensure integrity. The tool verifies the signature on the publisher's hash manifest, validates the signer's certificate chain to a self-signed root, and compares each bundle file's hash against the signed manifest. Chain links are required to be CA certificates (Basic Constraints), so an end-entity certificate cannot be used as an issuer. Results are shown as a table listing each file's status, manifest hash, and computed hash. The root's fingerprint is displayed for comparison against the issuing authority's published value. Attached and detached CMS signatures are supported, with RSA PKCS#1 v1.5, RSA-PSS, and ECDSA (P-256/P-384/P-521). 
 
-**Import.** Reads DER, PEM, headerless Base64, and PKCS#7 bundles. Certificates already in the report are skipped rather than added again, so importing the same bundle in multiple encodings does not create duplicate rows.
+**Import.** Reads DER, PEM, headerless Base64, and PKCS#7 bundles. Certificates already in the report are skipped rather than added again.
 
 **Report.** One row per certificate: subject, issuer, validity dates, serial number, key and signature algorithms, SHA-1 thumbprint, OCSP and CRL URLs, and certificate type. Expired certificates are flagged in red. The search box highlights matching rows across all columns, including serials and thumbprints. Checkboxes select specific rows for export.
 
 **Compare.** Diffs two certificate sets in a report-style table. 
 
-**Export.** Exports include the selected certificates, or all certificates if none are selected, with any duplicates removed automatically if present. Available export formats: a single certificate as DER (.cer), a concatenated PEM bundle suitable for use as a CA file, a DER-encoded PKCS#7 bundle (.p7b), CSV, and a standalone HTML copy of the report. 
+**Export.** Exports include the selected certificates, or all certificates if none are selected, with any duplicates removed automatically if present. Available export formats: a single certificate as DER (.cer), a concatenated PEM bundle suitable for use as a CA file, a DER-encoded PKCS#7 bundle (.p7b), CSV file, or a standalone HTML copy of the report. 
 
 ## Notes
 
