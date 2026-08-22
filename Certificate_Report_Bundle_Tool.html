@@ -334,7 +334,7 @@
     <p>Compare, in the title bar, diffs two certificate sets. Drop the baseline on the Reference side and the set you're evaluating on the Comparison side; differences appear as a table once both sides have certificates. Matching uses the full subject, so same-named certificates from different organizations aren't confused.</p>
 
     <h2>Export</h2>
-    <p>Exports cover the checked rows, or the whole report if nothing is checked, with duplicates removed. Use PEM for an openssl-style CA file, P7B for Windows and Java trust stores, .cer for a single certificate as DER, CSV for a spreadsheet copy of the report with SHA-256 thumbprints added, and HTML for a standalone copy of the report you can share, archive, or print.</p>
+    <p>Exports cover the checked rows, or the whole report if nothing is checked, with duplicates removed. Use PEM for an openssl-style CA file, P7B for Windows and Java trust stores, .cer for a single certificate as DER, CSV for a spreadsheet copy of the report with SHA-256 thumbprints added, and HTML for a standalone copy of the report you can share, archive, or print. Before writing a .cer, PEM, or P7B file, the tool re-reads its own output and refuses the export unless every certificate reads back byte-identical to the report.</p>
 
     <h2>Notes</h2>
     <ul>
@@ -1728,7 +1728,11 @@ document.getElementById("exportHtml").addEventListener("click", async ()=>{
    (a single certificate in scope produces a bare single-certificate
    PEM), a degenerate PKCS#7 bundle (.p7b), CSV, and a standalone HTML
    report page. Every export prompts for the output filename with a
-   default supplied.
+   default supplied. The three certificate-emitting exports (.cer, PEM,
+   P7B) re-read their own output with the import parsers and refuse to
+   write unless every certificate reads back byte-identical to its
+   report row; a bundle destined for a trust store is never handed over
+   unchecked.
    ====================================================================== */
 
 /** Rows the exports operate on: the selection, or all rows if none. */
@@ -1788,6 +1792,34 @@ async function saveBlob(data, type, defaultName){
   return name;
 }
 
+/**
+ * Re-read a built export and confirm it reproduces the source
+ * certificates exactly, before any file is written. The output is
+ * parsed with the same readers imports use; the check fails if the
+ * certificate count differs or any extracted certificate is not
+ * byte-identical to its source row, in order. A tool whose exports
+ * feed production trust stores must never hand over a file it cannot
+ * itself read back verbatim.
+ * @param {Uint8Array|string} data  Built export (DER bytes or PEM text).
+ * @param {Array} expected          uniqueCerts() rows, in written order.
+ * @returns {boolean}
+ */
+function verifyExport(data, expected){
+  try {
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+    const items = extractCertBuffers(bytes, "export self-check");
+    if (items.length !== expected.length) return false;
+    for (let i = 0; i < items.length; i++)
+      if (!bytesEqual(items[i].bytes, expected[i].raw)) return false;
+    return true;
+  } catch(e){ return false; }
+}
+
+/** Refusal notice shared by the certificate-emitting exports. */
+function exportRefused(kind){
+  exportNotice("Export REFUSED: "+kind+" self-check failed - the built output did not read back identical to the report. Nothing was written.");
+}
+
 /** YYYYMMDD stamp for export filenames. */
 function stamp(){
   const d = new Date();
@@ -1807,16 +1839,19 @@ document.getElementById("exportPem").addEventListener("click", async ()=>{
   if (certs.length === 1){
     const r = certs[0];
     const pem = "-----BEGIN CERTIFICATE-----\n"+b64Wrap(r.raw)+"\n-----END CERTIFICATE-----\n";
+    if (!verifyExport(pem, certs)) return exportRefused("PEM");
     const name = await saveBlob(pem, "application/x-pem-file", certFileBase(r)+".pem");
-    if (name) exportNotice("Certificate exported: "+name);
+    if (name) exportNotice("Certificate exported: "+name+" - output re-verified");
     return;
   }
   const parts = certs.map(r =>
     "subject=CN = "+(r.subjectCN||"")+"\nissuer=CN = "+(r.issuerCN||"")+"\n" +
     "-----BEGIN CERTIFICATE-----\n"+b64Wrap(r.raw)+"\n-----END CERTIFICATE-----\n"
   );
-  const name = await saveBlob(parts.join("\n"), "application/x-pem-file", "ca_bundle_"+stamp()+".pem");
-  if (name) exportNotice("PEM bundle exported: "+name+" - "+certs.length+" certificate(s)"+(uc.selectedOnly?" (selected only)":"")+(duplicates?", "+duplicates+" duplicate(s) removed":""));
+  const pemAll = parts.join("\n");
+  if (!verifyExport(pemAll, certs)) return exportRefused("PEM");
+  const name = await saveBlob(pemAll, "application/x-pem-file", "ca_bundle_"+stamp()+".pem");
+  if (name) exportNotice("PEM bundle exported: "+name+" - "+certs.length+" certificate(s) re-verified"+(uc.selectedOnly?" (selected only)":"")+(duplicates?", "+duplicates+" duplicate(s) removed":""));
 });
 
 /* Minimal DER writer for the P7B export: an unsigned PKCS#7 SignedData
@@ -1852,8 +1887,9 @@ document.getElementById("exportCer").addEventListener("click", async ()=>{
   const { certs } = uniqueCerts();
   if (certs.length !== 1) return;
   const r = certs[0];
+  if (!verifyExport(r.raw, certs)) return exportRefused(".cer");
   const name = await saveBlob(r.raw, "application/pkix-cert", certFileBase(r)+".cer");
-  if (name) exportNotice("Certificate exported: "+name);
+  if (name) exportNotice("Certificate exported: "+name+" - output re-verified");
 });
 
 document.getElementById("exportP7b").addEventListener("click", async ()=>{
@@ -1868,8 +1904,9 @@ document.getElementById("exportP7b").addEventListener("click", async ()=>{
   const oidSigned  = new Uint8Array([0x06,0x09,0x2A,0x86,0x48,0x86,0xF7,0x0D,0x01,0x07,0x02]);
   const explicit0  = derWrap(0xA0, signedData);
   const p7b        = derWrap(0x30, derConcat([oidSigned, explicit0]));
+  if (!verifyExport(p7b, certs)) return exportRefused("P7B");
   const name = await saveBlob(p7b, "application/x-pkcs7-certificates", "ca_bundle_"+stamp()+".der.p7b");
-  if (name) exportNotice("P7B bundle exported: "+name+" - "+certs.length+" certificate(s)"+(uc.selectedOnly?" (selected only)":"")+(duplicates?", "+duplicates+" duplicate(s) removed":""));
+  if (name) exportNotice("P7B bundle exported: "+name+" - "+certs.length+" certificate(s) re-verified"+(uc.selectedOnly?" (selected only)":"")+(duplicates?", "+duplicates+" duplicate(s) removed":""));
 });
 
 /* ======================================================================

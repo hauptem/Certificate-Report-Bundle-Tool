@@ -22,7 +22,7 @@ Usage: Open `Certificate Report Bundle Tool.html` in a modern browser.
 
 ## Notes
 
-- This tool **never** modifies certificate data. Certificates are held as bytes they import as, and every export writes those same bytes back out; conversion between PEM and P7B only changes the container around them. The P7B export is the standard certificates-only PKCS#7 structure (RFC 2315), equivalent to `openssl crl2pkcs7 -nocrl` output, and the round trip has been verified byte-for-byte against openssl. Certificate creation and key handling are out of scope for this tool.
+- This tool **never** modifies certificate data. Certificates are held as bytes they import as, and every export writes those same bytes back out; conversion between PEM and P7B only changes the container around them. The P7B export is the standard certificates-only PKCS#7 structure (RFC 2315), equivalent to `openssl crl2pkcs7 -nocrl` output, and the round trip has been verified byte-for-byte against openssl. Every .cer, PEM, and P7B export additionally re-reads its own output before writing and is refused unless each certificate reads back byte-identical to the report. Certificate creation and key handling are out of scope for this tool.
 - This tool does not perform external revocation status checks. OCSP and CRL URLs are simply captured from the certs and presented for review. 
 - Signed manifests must be in sha256sum, sha384sum, or sha512sum format. Signature files are recognized by the extensions `.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, and `.sig`
 - Folder drag-and-drop is not supported for pages opened from disk. Select all the files directly and drop them into the tool.

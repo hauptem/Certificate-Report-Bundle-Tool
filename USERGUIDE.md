@@ -30,7 +30,7 @@ Compare, in the title bar, diffs two certificate sets. Drop the baseline on the 
 
 ## Export
 
-Exports cover the checked rows, or the whole report if nothing is checked, with duplicates removed. Use PEM for an openssl-style CA file, P7B for Windows and Java trust stores, .cer for a single certificate as DER, CSV for a spreadsheet copy of the report with SHA-256 thumbprints added, and HTML for a standalone copy of the report you can share, archive, or print.
+Exports cover the checked rows, or the whole report if nothing is checked, with duplicates removed. Use PEM for an openssl-style CA file, P7B for Windows and Java trust stores, .cer for a single certificate as DER, CSV for a spreadsheet copy of the report with SHA-256 thumbprints added, and HTML for a standalone copy of the report you can share, archive, or print. Before writing a .cer, PEM, or P7B file, the tool re-reads its own output and refuses the export unless every certificate reads back byte-identical to the report.
 
 ## Notes
 
