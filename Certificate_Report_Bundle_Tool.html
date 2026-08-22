@@ -350,7 +350,8 @@
       <li>The chain is incomplete: drop the missing issuer certificate. Certificates from every dropped file are used for chain building</li>
       <li>A file shows as skipped: nothing in the manifest matches it by name or content. This is normal for chain files and documentation</li>
       <li>Folder drag-and-drop doesn't work when the page is opened from disk: select the files inside the folder instead</li>
-      <li>Fewer rows appear than expected: check the notices above the Import drop zone for files that failed to parse</li>
+      <li>Fewer rows appear than expected: check the notices above the Import drop zone; whole-file failures, duplicates, and unparseable entries skipped inside otherwise-valid files are all reported there</li>
+      <li>"Indefinite length not allowed in DER": the signature is BER-encoded (some mail clients emit this); re-encode it to DER with openssl cms before verifying</li>
     </ul>
   </div>
 </dialog>
@@ -789,17 +790,19 @@ function certsFromDER(bytes, filename){
     const certSet = children(bytes, sd).find(k=>k.cls===2 && k.tag===0);
     if (!certSet) throw new Error("PKCS#7: no certificates present in bundle");
     const out = [];
-    let n = 1;
+    let n = 1, skipped = 0;
     for (const c of children(bytes, certSet)){
       // CertificateChoices admits non-certificate members (attribute
       // certificates, other tagged forms, RFC 5652 10.2.2); each entry
       // is validated individually so one exotic member cannot fail the
-      // whole bundle. Import counts reveal any skips.
+      // whole bundle. Skips are counted on the returned array and
+      // surfaced in the import notices.
       const entry = bytesOf(bytes, c);
-      try { parseCertificate(entry); } catch(e){ n++; continue; }
+      try { parseCertificate(entry); } catch(e){ n++; skipped++; continue; }
       out.push({ bytes: entry, label: filename+" ["+(n++)+"]" });
     }
     if (!out.length) throw new Error("PKCS#7: no parseable certificates in bundle");
+    out.skipped = skipped;
     return out;
   }
   // Bare certificate path. The certificate's extent is its outer TLV,
@@ -809,7 +812,7 @@ function certsFromDER(bytes, filename){
   // export. Whitespace between and after certificates is skipped;
   // any other trailing data fails loudly.
   const out = [];
-  let p = 0, n = 1;
+  let p = 0, n = 1, skipped = 0;
   while (p < bytes.length){
     if (bytes[p] === 0x0A || bytes[p] === 0x0D || bytes[p] === 0x20 || bytes[p] === 0x09){ p++; continue; }
     let node = null;
@@ -827,6 +830,7 @@ function certsFromDER(bytes, filename){
       // Skips consume a label number, matching the PKCS#7 path, so a
       // skip count correlates with the numbering either way.
       n++;
+      skipped++;
       p = node.end;
       continue;
     }
@@ -836,6 +840,7 @@ function certsFromDER(bytes, filename){
     n++;
     p = node.end;
   }
+  out.skipped = skipped;
   return out;
 }
 
@@ -862,31 +867,35 @@ function extractCertBuffers(buf, filename){
   }
   let text = "";
   try { text = new TextDecoder("utf-8",{fatal:false}).decode(bytes); } catch(e){}
-  const blocks = [...text.matchAll(/-----BEGIN (CERTIFICATE|PKCS7|PKCS #7 SIGNED DATA)-----([\s\S]*?)-----END \1-----/g)];
+  const blocks = [...text.matchAll(/-----BEGIN (CERTIFICATE|PKCS7|CMS|PKCS #7 SIGNED DATA)-----([\s\S]*?)-----END \1-----/g)];
   if (blocks.length){
     const out = [];
+    let skipped = 0;
     const multi = blocks.length > 1;
     blocks.forEach((m, idx)=>{
       const base = multi ? filename+" ("+(idx+1)+")" : filename;
       let der = null;
-      try { der = b64ToBytes(m[2]); } catch(e){ return; }
+      try { der = b64ToBytes(m[2]); } catch(e){ skipped++; return; }
       if (m[1] === "CERTIFICATE"){
         // Validated here, matching the per-member tolerance of the
-        // PKCS#7 path: a corrupt block is skipped rather than failing
-        // the file after earlier blocks already imported, which left
-        // the report and the error notice disagreeing.
+        // PKCS#7 path: a corrupt block is skipped (and counted)
+        // rather than failing the file after earlier blocks already
+        // imported, which left the report and the error notice
+        // disagreeing.
         try { parseCertificate(der); out.push({ bytes: der, label: base }); }
-        catch(e){}
+        catch(e){ skipped++; }
       }
       else {
         // Same per-block tolerance as CERTIFICATE blocks: a corrupt
-        // PKCS7 armor (including a Base64 body atob rejects) is
-        // skipped rather than failing valid blocks before it; an
-        // all-corrupt file hits the no-parseable-certificates throw.
-        try { out.push(...certsFromDER(der, base)); } catch(e){}
+        // armor block (including a Base64 body atob rejects) is
+        // skipped and counted rather than failing valid blocks before
+        // it; an all-corrupt file hits the no-parseable throw.
+        try { const sub = certsFromDER(der, base); out.push(...sub); skipped += sub.skipped || 0; }
+        catch(e){ skipped++; }
       }
     });
     if (!out.length) throw new Error("No parseable certificates in PEM blocks");
+    out.skipped = skipped;
     return out;
   }
   // "MII" is the Base64 opening of a DER SEQUENCE 256+ bytes long; a
@@ -1143,7 +1152,9 @@ function parseCMS(bytes){
   let p = 0;
   p++; // CMSVersion
   const sid = sik[p++];
-  const digestAlgOID = decodeOID(contentOf(bytes, children(bytes, sik[p++])[0]));
+  const dk = children(bytes, sik[p++]);
+  if (!dk.length) throw new Error("SignerInfo digestAlgorithm is empty");
+  const digestAlgOID = decodeOID(contentOf(bytes, dk[0]));
   let signedAttrsNode = null;
   if (sik[p] && sik[p].cls === 2 && sik[p].tag === 0) signedAttrsNode = sik[p++];
   // signatureAlgorithm and signature must both remain after the
@@ -1436,7 +1447,7 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
       }
       if (!issuer){
         if (candidates.every(c=>!c.isCA)){ out.steps.push(["bad","Chain REJECTED: \""+(candidates[0].subjectCN||"?")+"\" is not a CA certificate (Basic Constraints) and cannot issue certificates"]); return untrustedManifest(out, eContent, "chain rejected"); }
-        out.steps.push(["bad","Chain signature INVALID: \""+(current.subjectCN||"?")+"\" not properly signed by any of the "+candidates.length+" certificates sharing the issuer subject"]);
+        out.steps.push(["bad","Chain signature INVALID: \""+(current.subjectCN||"?")+"\" not properly signed by any of the "+candidates.filter(c=>c.isCA).length+" CA certificate(s) sharing the issuer subject"]);
         return untrustedManifest(out, eContent, "chain signature invalid");
       }
     } else {
@@ -1600,7 +1611,7 @@ function render(){
       return '<tr class="'+trClass+'">' +
         '<td class="selcol"><input type="checkbox" class="sel" data-id="'+r.id+'"'+(selected.has(r.id)?' checked':'')+' aria-label="Select row"></td>' +
         '<td>'+(r.cat ? '<span class="'+chipClass(r.cat)+'">'+esc(r.cat)+'</span>' : '')+'</td>' +
-        '<td class="certname" data-id="'+r.id+'" title="Show PEM" tabindex="0">'+esc(r.name)+'</td>' +
+        '<td class="certname" data-id="'+r.id+'" title="Show PEM" tabindex="0" role="button">'+esc(r.name)+'</td>' +
         '<td>'+esc(r.ver)+'</td>' +
         '<td>'+esc(r.rel)+'</td>' +
         '<td>'+esc(r.org)+'</td>' +
@@ -1666,7 +1677,9 @@ async function importBuffer(buf, filename, batch){
   const useCat = cat || meta.cat || "";
   const useVer = ver || meta.ver || "";
   let added = 0, dupes = 0;
-  for (const item of extractCertBuffers(buf, filename)){
+  const items = extractCertBuffers(buf, filename);
+  const skipped = items.skipped || 0;
+  for (const item of items){
     const c = parseCertificate(item.bytes);
     const thumb256 = await digestHex("SHA-256", c.raw);
     // Checked against live report state at insertion, not a snapshot
@@ -1691,13 +1704,14 @@ async function importBuffer(buf, filename, batch){
                 subjectCN: c.subjectCN, raw: c.raw.slice() });
     added++;
   }
-  return { added, dupes };
+  return { added, dupes, skipped };
 }
 
 /** Import notices shown above the report-bound drop zone. */
-function importNotices(errs, dupes){
+function importNotices(errs, dupes, skipped){
   const notices = errs.map(e=>'<div class="err">\u26A0 '+esc(e)+'</div>');
   if (dupes) notices.push('<div class="err" style="color:var(--amber)">\u26A0 '+dupes+' duplicate certificate(s) skipped (already in the report)</div>');
+  if (skipped) notices.push('<div class="err" style="color:var(--amber)">\u26A0 '+skipped+' unparseable entr'+(skipped===1?'y':'ies')+' skipped inside otherwise-valid files</div>');
   if (notices.length){
     errBox.style.display = "block";
     errBox.innerHTML = notices.join("");
@@ -1722,7 +1736,7 @@ async function handleFilesWork(fileList){
   const en = document.getElementById("exportNotice");
   en.style.display = "none"; en.textContent = "";
   const errs = [];
-  let dupes = 0;
+  let dupes = 0, skipped = 0;
   // Snapshotted once per drop: the queue serializes drops but not
   // field edits, so reading per buffer would label later files in the
   // same drop differently from earlier ones.
@@ -1732,12 +1746,13 @@ async function handleFilesWork(fileList){
   for (const f of fileList){
     try {
       const buf = await f.arrayBuffer();
-      dupes += (await importBuffer(buf, f.name, batch)).dupes;
+      const r = await importBuffer(buf, f.name, batch);
+      dupes += r.dupes; skipped += r.skipped;
     } catch(e){
       errs.push(f.name + " - " + e.message);
     }
   }
-  importNotices(errs, dupes);
+  importNotices(errs, dupes, skipped);
   render();
 }
 
@@ -2611,7 +2626,7 @@ async function vImportFilesWork(names){
   const en = document.getElementById("exportNotice");
   en.style.display = "none"; en.textContent = "";
   const errs = [];
-  let added = 0, dupes = 0;
+  let added = 0, dupes = 0, skipped = 0;
   const batch = { cat: document.getElementById("bCat").value.trim(),
                   ver: document.getElementById("bVer").value.trim(),
                   rel: document.getElementById("bRel").value.trim() };
@@ -2621,11 +2636,12 @@ async function vImportFilesWork(names){
     if (!bytes) continue;
     try {
       const r = await importBuffer(bytes, name, batch);
+      skipped += r.skipped;
       added += r.added; dupes += r.dupes;
     } catch(e){ errs.push(name + " - " + e.message); }
   }
   errBox.style.display = "none"; errBox.innerHTML = "";
-  importNotices(errs, dupes);
+  importNotices(errs, dupes, skipped);
   render();
   return { added, dupes };
 }
@@ -2639,7 +2655,8 @@ vResults.addEventListener("click", async e=>{
   btn.disabled = true;
   await vImportFiles(names);
   // Feedback is a brief color change only; the label never changes, so
-  // the table layout never shifts. Counts appear in the import notice
+  // the table layout never shifts. Errors, duplicate counts, and
+  // skipped-entry counts appear in the import notice
   // area, and the button re-enables for use after a report clear.
   btn.classList.add("done");
   setTimeout(()=>{ btn.classList.remove("done"); btn.disabled = false; }, 1500);
@@ -2714,8 +2731,16 @@ async function cmpHandleFilesWork(side, fileList){
         const c = parseCertificate(item.bytes);
         const key = await digestHex("SHA-256", c.raw);
         if (!cmpState[side].has(key)){
-          c.raw = c.raw.slice(); // release the source file buffer
-          cmpState[side].set(key, { c, thumb1: await digestHex("SHA-1", c.raw) });
+          // A plain record with copied byte fields: keeping the parsed
+          // certificate would pin the dropped file's buffer through
+          // its many subarray views for the dialog's lifetime. Only
+          // what the diff and its table read is kept.
+          const rec = { raw: c.raw.slice(), subjectBytes: c.subjectBytes.slice(),
+                        spkiBytes: c.spkiBytes.slice(), sigAlgOID: c.sigAlgOID,
+                        subjectCN: c.subjectCN, org: c.org, issuerCN: c.issuerCN,
+                        notBefore: c.notBefore, notAfter: c.notAfter,
+                        serialDisplay: c.serialDisplay };
+          cmpState[side].set(key, { c: rec, thumb1: await digestHex("SHA-1", rec.raw) });
         }
       }
     } catch(e){ cmpState.errs[side].push(f.name+": "+e.message); }
