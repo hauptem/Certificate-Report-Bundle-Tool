@@ -177,6 +177,7 @@
   #vresults .st-ok{color:#2e6b45;font-weight:600;white-space:nowrap}
   #vresults .st-bad{color:#c62828;font-weight:600;white-space:nowrap}
   #vresults .st-dim{color:#5c6572;white-space:nowrap}
+  #vresults .st-warn{color:#a15c00;font-weight:600;white-space:nowrap}
   #vresults tbody tr.row-red td{background:#f7dcdc}
   @media (prefers-reduced-motion: reduce){*{transition:none!important}}
 </style>
@@ -316,7 +317,7 @@
     <p>To verify a release, drop all of its files into the zone: the signature file, the chain file if there is one, and the bundle files. The tool checks the manifest signature, builds the signer's chain, and compares every file against the signed manifest. Problems are marked in red, warnings in amber, and each file row shows the manifest hash next to the computed one.</p>
     <p>The tool never trusts the root certificate, since it came in the same download. It shows the root's fingerprints instead. Compare one of them against the value the issuing authority publishes, and the release is verified once that matches and everything else is clean.</p>
     <p>Use the Import buttons in the results to send a verified file's certificates to the report without dropping it again.</p>
-    <p>Signature files are recognized by their extension (<code>.sha256</code>, <code>.sha384</code>, <code>.sha512</code>, <code>.p7s</code>, <code>.p7m</code>, <code>.sig</code>), and the manifest must be sha256sum, sha384sum, or sha512sum output. Attached and detached signatures both work, with RSA PKCS#1 v1.5, RSA-PSS, or ECDSA on P-256, P-384, or P-521.</p>
+    <p>Signature files are recognized by their extension (<code>.sha256</code>, <code>.sha384</code>, <code>.sha512</code>, <code>.p7s</code>, <code>.p7m</code>, <code>.sig</code>), and the manifest must be sha256sum, sha384sum, or sha512sum output. Attached and detached signatures both work, with RSA PKCS#1 v1.5, RSA-PSS, or ECDSA on P-256, P-384, or P-521. Co-signed releases are checked against the first signer only.</p>
 
     <h2>Import</h2>
     <p>Drop certificate files into the zone. DER, PEM, headerless Base64, and PKCS#7 bundles are all accepted, and bundles expand to one row per certificate. Certificates already in the report are skipped, so the same bundle in two encodings won't create duplicates.</p>
@@ -451,6 +452,10 @@ function decodeOID(bytes){
       v = 0;
     }
   }
+  // A continuation bit still set at the end means the last
+  // subidentifier was cut off; failing matches the decoder's
+  // fail-loud convention rather than returning a shortened OID.
+  if (bytes.length && (bytes[bytes.length-1] & 0x80)) throw new Error("Truncated OID");
   return out.join(".");
 }
 
@@ -643,7 +648,12 @@ function parseCertificate(bytes){
     spkiBytes: bytesOf(bytes, spkiNode),
     issuerBytes: bytesOf(bytes, issuerNode),
     subjectBytes: bytesOf(bytes, subjectNode),
+    // DER INTEGER prepends 0x00 when the high bit is set; openssl
+    // x509 -serial prints without it, and the display field follows so
+    // serials copied from the report match openssl output. serialHex
+    // keeps the raw content octets for SignerIdentifier comparison.
     serialHex: [...contentOf(bytes, serialNode)].map(x=>x.toString(16).padStart(2,"0")).join(""),
+    serialDisplay: (h => h.length > 2 && h.startsWith("00") && parseInt(h[2],16) >= 8 ? h.slice(2) : h)([...contentOf(bytes, serialNode)].map(x=>x.toString(16).padStart(2,"0")).join("")),
     sigAlgOID, sigAlgParams, signature
   };
 }
@@ -1093,7 +1103,7 @@ function manifestEntry(manifest, name){
  * guidance always accompanies a verified chain.
  */
 async function verifyCMS(cms, pool, pending){
-  const out = { steps: [], manifest: null, ok: false, contentName: null };
+  const out = { steps: [], manifest: null, ok: false, contentName: null, chainComplete: false };
   const allCerts = cms.certs.concat(pool);
   // Locate the signer certificate by issuer and serial number among
   // CMS-embedded certificates and the externally provided pool.
@@ -1259,6 +1269,7 @@ async function verifyCMS(cms, pool, pending){
     out.steps.push(["ok", path.length > 1
       ? "Chain verified: "+path.join(" \u2192 ")
       : "Signer is self-signed; no chain to verify"]);
+    out.chainComplete = true;
     const sha1 = await digestHex("SHA-1", current.raw);
     const sha256 = await digestHex("SHA-256", current.raw);
     out.steps.push(["info","Root of trust: "+(current.subjectCN||"?")+" (self-signed). Confirm its fingerprint against the issuing authority's published value:"]);
@@ -1443,7 +1454,7 @@ async function importBuffer(buf, filename, have){
     rows.push({ id: nextId++, name, cat: useCat, ver: useVer, rel,
                 org: c.org, issuerCN: c.issuerCN,
                 notBefore: c.notBefore, notAfter: c.notAfter,
-                serial: c.serialHex, key: keyInfo(c.spkiBytes),
+                serial: c.serialDisplay, key: keyInfo(c.spkiBytes),
                 sigAlg: sigAlgName(c.sigAlgOID),
                 thumb1: await digestHex("SHA-1", c.raw),
                 thumb256,
@@ -1538,6 +1549,7 @@ document.getElementById("selAll").addEventListener("change", e=>{
 });
 document.getElementById("search").addEventListener("input", e=>{
   searchQuery = e.target.value.trim().toLowerCase();
+  if (!searchQuery) lastFirstHit = null;
   render();
   if (searchQuery){
     const first = document.querySelector("tbody tr.hit");
@@ -1819,6 +1831,7 @@ document.getElementById("exportP7b").addEventListener("click", async ()=>{
 /* ======================================================================
    SECTION 8. VERIFICATION PANEL
    vState.cms        - parsed CMS from the signature file, if loaded.
+   vState.fileCerts  - per-file parsed certificates; pool is derived
    vState.pool       - certificates from any provided files (chain
                        building input).
    vState.pending    - all non-signature files, held unhashed until the
@@ -1832,7 +1845,7 @@ document.getElementById("exportP7b").addEventListener("click", async ()=>{
                        certificates; these receive Import buttons in
                        the results table.
    ====================================================================== */
-const vState = { cms: null, cmsName: "", pool: [], pending: new Map(), fileHashes: new Map(), aliasMatch: new Map(), importable: new Set(), lastResult: null, sigNotes: new Map(), smimeContent: null };
+const vState = { cms: null, cmsName: "", pool: [], pending: new Map(), fileHashes: new Map(), aliasMatch: new Map(), importable: new Set(), lastResult: null, sigNotes: new Map(), smimeContent: null, fileCerts: new Map() };
 const vResults = document.getElementById("vresults");
 
 /**
@@ -1859,8 +1872,13 @@ function vRender(){
   // Files with signature extensions that did not parse as CMS are
   // reported as notes: for a plain manifest next to its .sig this is
   // informational, for a corrupt signature it is the only evidence.
-  for (const [name, msg] of vState.sigNotes)
-    parts.push('<div class="vline vwarn">\u26A0 '+esc(name)+' - not a parsable signature ('+esc(msg)+'); treated as content</div>');
+  for (const name of vState.sigNotes.keys()){
+    // Once the file is identified as the signed content, the note has
+    // served its purpose and would only mislabel the normal
+    // release.sha256 + release.sha256.sig layout as a problem.
+    if (vState.lastResult && vState.lastResult.contentName === name) continue;
+    parts.push('<div class="vline vwarn">\u26A0 '+esc(name)+' - no signature found inside; treated as content</div>');
+  }
   // lastResult renders even with cms null: a signature file that failed
   // to parse stores its error there, and that error must be shown
   // rather than the missing-manifest hint.
@@ -1916,7 +1934,14 @@ function vRender(){
         const expected = hit.entry.hash;
         const hash = vState.fileHashes.get(name);
         if (expected === hash){
-          push(frow(name, name, "st-ok", "\u2713 Matches signed manifest", expected, hash), name);
+          // A matching hash proves the manifest covers this file; the
+          // green verdict additionally requires the signer's chain to
+          // have reached a root, since the fingerprint comparison is
+          // the trust decision and it needs a root to compare.
+          if (vState.lastResult.chainComplete)
+            push(frow(name, name, "st-ok", "\u2713 Matches signed manifest", expected, hash), name);
+          else
+            push(frow(name, name, "st-warn", "Matches manifest (signer chain unverified)", expected, hash), name);
         } else {
           push(frow(null, name, "st-bad", "\u2717 HASH MISMATCH - altered or corrupted", expected, hash||"", "row-red"), name);
         }
@@ -1924,7 +1949,10 @@ function vRender(){
       // Group 1b: files matched to manifest entries by content hash.
       for (const [name, mkey] of vState.aliasMatch){
         const entry = manifest.get(mkey);
-        push(frow(name, name, "st-ok", "\u2713 Matches "+esc(entry.display || mkey)+" (filename differs)", entry.hash, vState.fileHashes.get(name)), name);
+        push(frow(name, name,
+          vState.lastResult.chainComplete ? "st-ok" : "st-warn",
+          (vState.lastResult.chainComplete ? "\u2713 " : "")+"Matches "+esc(entry.display || mkey)+" (filename differs)"+(vState.lastResult.chainComplete ? "" : " (signer chain unverified)"),
+          entry.hash, vState.fileHashes.get(name)), name);
       }
       // Group 2: manifest entries with no corresponding provided file.
       const aliased = new Set(vState.aliasMatch.values());
@@ -2071,18 +2099,30 @@ async function vHandleFiles(fileList){
       }
     }
     // A re-dropped file replaces its pending bytes, so any cached
-    // digest for that name is stale and must be recomputed.
+    // digest for that name is stale and must be recomputed. Its
+    // previous certificates and importable status go with it: new
+    // content that no longer parses must not leave the old content's
+    // certificates in the chain pool or an Import button on the row.
     vState.fileHashes.delete(f.name);
     vState.pending.set(f.name, new Uint8Array(buf));
+    vState.fileCerts.delete(f.name);
+    vState.importable.delete(f.name);
     try {
+      const certs = [];
       for (const item of extractCertBuffers(buf, f.name)){
-        const c = parseCertificate(item.bytes);
-        // Re-dropped files would otherwise accumulate duplicates.
-        if (!vState.pool.some(p=>bytesEqual(p.raw, c.raw))) vState.pool.push(c);
+        certs.push(parseCertificate(item.bytes));
       }
+      vState.fileCerts.set(f.name, certs);
       vState.importable.add(f.name);
     } catch(e){ /* Non-certificate files participate in hashing only. */ }
   }
+  // The chain pool is derived from per-file certificates so re-drops
+  // can never strand a stale entry; byte-identical certificates
+  // appearing in several files collapse to one.
+  vState.pool.length = 0;
+  for (const certs of vState.fileCerts.values())
+    for (const c of certs)
+      if (!vState.pool.some(p=>bytesEqual(p.raw, c.raw))) vState.pool.push(c);
   await vRun();
 }
 
@@ -2146,6 +2186,7 @@ vclear.addEventListener("click", e=>{
   vState.aliasMatch.clear();
   vState.sigNotes.clear();
   vState.smimeContent = null;
+  vState.fileCerts.clear();
   vState.importable.clear();
   vState.lastResult = null;
   vRender();
@@ -2170,7 +2211,7 @@ render();
    files are harmless. Subject matching uses the full subject DER, not
    the CN, to avoid cross-organization name collisions.
    ====================================================================== */
-const cmpState = { ref: new Map(), comp: new Map(), showAll: false };
+const cmpState = { ref: new Map(), comp: new Map(), showAll: false, errs: [] };
 
 /**
  * Intake for one comparison side: expand every dropped file to
@@ -2179,7 +2220,10 @@ const cmpState = { ref: new Map(), comp: new Map(), showAll: false };
  * the results area without discarding the rest.
  */
 async function cmpHandleFiles(side, fileList){
-  const errs = [];
+  // Errors persist in cmpState so a Show-all toggle or a clear of the
+  // other side does not silently drop them; the next drop replaces
+  // them, and clearing a side clears its errors with it.
+  cmpState.errs = [];
   for (const f of fileList){
     const buf = new Uint8Array(await f.arrayBuffer());
     try {
@@ -2189,9 +2233,9 @@ async function cmpHandleFiles(side, fileList){
         if (!cmpState[side].has(key))
           cmpState[side].set(key, { c, thumb1: await digestHex("SHA-1", c.raw) });
       }
-    } catch(e){ errs.push(f.name+": "+e.message); }
+    } catch(e){ cmpState.errs.push(f.name+": "+e.message); }
   }
-  cmpRender(errs);
+  cmpRender();
 }
 
 /**
@@ -2202,7 +2246,8 @@ async function cmpHandleFiles(side, fileList){
  * row per version), extra, then identical in show-all mode. Runs only
  * when both sides hold at least one certificate.
  */
-function cmpRender(errs){
+function cmpRender(){
+  const errs = cmpState.errs;
   const box = document.getElementById("cmpResults");
   document.getElementById("cmpCountRef").textContent  = cmpState.ref.size  ? cmpState.ref.size+" certificate(s)"  : "empty";
   document.getElementById("cmpCountComp").textContent = cmpState.comp.size ? cmpState.comp.size+" certificate(s)" : "empty";
@@ -2266,7 +2311,7 @@ function cmpRender(errs){
       td("issuer","",esc(c.issuerCN ? "CN = "+c.issuerCN : "")) +
       td("nb","",fmtDate(c.notBefore)) +
       td("na","",fmtDate(c.notAfter)) +
-      td("serial","mono-sm",esc(c.serialHex)) +
+      td("serial","mono-sm",esc(c.serialDisplay)) +
       td("key","",esc(keyInfo(c.spkiBytes))) +
       td("sig","",esc(sigAlgName(c.sigAlgOID))) +
       td("thumb","mono-sm",esc(e.thumb1)) +
@@ -2285,7 +2330,7 @@ function cmpRender(errs){
       issuer: e=>e.c.issuerCN || "",
       nb:     e=>fmtDate(e.c.notBefore),
       na:     e=>fmtDate(e.c.notAfter),
-      serial: e=>e.c.serialHex,
+      serial: e=>e.c.serialDisplay,
       key:    e=>keyInfo(e.c.spkiBytes),
       sig:    e=>sigAlgName(e.c.sigAlgOID),
       thumb:  e=>e.thumb1
@@ -2333,6 +2378,7 @@ document.getElementById("cmpToggle").addEventListener("click", ()=>{
 document.getElementById("cmpClearBoth").addEventListener("click", ()=>{
   cmpState.ref.clear();
   cmpState.comp.clear();
+  cmpState.errs = [];
   cmpRender();
 });
 document.getElementById("cmpClose").addEventListener("click", ()=>{
@@ -2344,6 +2390,9 @@ for (const [side, zoneId, fileId, clearId] of [["ref","cmpZoneRef","cmpFileRef",
                                                ["comp","cmpZoneComp","cmpFileComp","cmpClearComp"]]){
   const zone = document.getElementById(zoneId);
   const input = document.getElementById(fileId);
+  zone.setAttribute("role","button");
+  zone.setAttribute("tabindex","0");
+  zone.addEventListener("keydown", e=>{ if (e.key==="Enter"||e.key===" "){ e.preventDefault(); input.click(); }});
   zone.addEventListener("click", ()=>input.click());
   zone.addEventListener("dragover", e=>{ e.preventDefault(); zone.classList.add("drag"); });
   zone.addEventListener("dragleave", ()=>zone.classList.remove("drag"));
@@ -2352,7 +2401,7 @@ for (const [side, zoneId, fileId, clearId] of [["ref","cmpZoneRef","cmpFileRef",
     cmpHandleFiles(side, [...e.dataTransfer.files]);
   });
   input.addEventListener("change", e=>{ cmpHandleFiles(side, [...e.target.files]); input.value=""; });
-  document.getElementById(clearId).addEventListener("click", ()=>{ cmpState[side].clear(); cmpRender(); });
+  document.getElementById(clearId).addEventListener("click", ()=>{ cmpState[side].clear(); cmpState.errs = []; cmpRender(); });
 }
 
 /* PEM view dialog: click a certificate name in the report to see that
