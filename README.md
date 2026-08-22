@@ -18,11 +18,11 @@ Usage: Open `Certificate Report Bundle Tool.html` in a modern browser.
 
 **Compare.** Diffs two certificate sets in a report-style table. 
 
-**Export.** Exports include the selected certificates, or all certificates if none are selected, with any duplicates removed automatically if present. Available export formats: a single certificate as DER (.cer), a concatenated PEM bundle suitable for use as a CA file, a DER-encoded PKCS#7 bundle (.p7b), CSV, and a standalone HTML copy of the report. A status line under the Report header confirms each export.
+**Export.** Exports include the selected certificates, or all certificates if none are selected, with any duplicates removed automatically if present. Available export formats: a single certificate as DER (.cer), a concatenated PEM bundle suitable for use as a CA file, a DER-encoded PKCS#7 bundle (.p7b), CSV, and a standalone HTML copy of the report. 
 
 ## Notes
 
-- This tool does not perform revocation status. OCSP and CRL URLs are captured from the certs and presented for review. 
+- This tool does not perform revocation status checks. OCSP and CRL URLs are simply captured from the certs and presented for review. 
 - Signed manifests must be in sha256sum, sha384sum, or sha512sum format. Signature files are recognized by the extensions `.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, and `.sig`
 - Folder drag-and-drop is not supported for pages opened from disk. Select all the files directly and drop them into the tool.
 
