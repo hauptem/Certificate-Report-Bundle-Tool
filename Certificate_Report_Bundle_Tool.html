@@ -591,7 +591,7 @@ function parseCertificate(bytes){
   // values are octet-aligned, so that byte is always 0x00 and skipped.
   const signature = sigBits.subarray(1);
 
-  let isCA = false, ocsp = "", crl = "";
+  let isCA = false, ocsp = "", crl = "", keyUsageBits = null;
   if (extNode){
     for (const ext of children(bytes, extNode)){
       const kids = children(bytes, ext);
@@ -605,6 +605,13 @@ function parseCertificate(bytes){
           const seq = readTLV(inner, 0);
           const c = children(inner, seq);
           if (c.length && c[0].tag === 1) isCA = inner[c[0].contentStart] !== 0;
+        } else if (oid === "2.5.29.15"){
+          // KeyUsage ::= BIT STRING; first content octet is the unused-
+          // bit count, the second carries digitalSignature (bit 0, MSB)
+          // through keyCertSign (bit 5). Absent extension stays null:
+          // no restriction is different from restricted.
+          const bs = readTLV(inner, 0);
+          if (bs.tag === 3 && bs.len >= 2) keyUsageBits = inner[bs.contentStart + 1];
         } else if (oid === OID_CRLDP){
           const seq = readTLV(inner, 0);
           const uris = [];
@@ -630,7 +637,7 @@ function parseCertificate(bytes){
     issuerCN:  issuer[OID_CN]  || "",
     org:       subject[OID_O]  || issuer[OID_O] || "",
     subjectCN: subject[OID_CN] || "",
-    notBefore, notAfter, selfSigned, isCA, ocsp, crl,
+    notBefore, notAfter, selfSigned, isCA, keyUsageBits, ocsp, crl,
     raw: bytes,
     tbsBytes: bytesOf(bytes, tbs),
     spkiBytes: bytesOf(bytes, spkiNode),
@@ -1034,6 +1041,9 @@ function parseManifest(eContent){
   const text = new TextDecoder("utf-8",{fatal:false}).decode(eContent);
   const map = new Map();
   const algByLen = {64:"SHA-256", 96:"SHA-384", 128:"SHA-512"};
+  // sha256sum backslash-escaping (leading \ plus escaped name for
+  // filenames with backslashes or newlines) is not unescaped here;
+  // such entries miss on name and are recovered by content hash.
   for (const line of text.split(/\r?\n/)){
     const m = line.match(/^([0-9a-fA-F]{64}|[0-9a-fA-F]{96}|[0-9a-fA-F]{128})[ \t*]+(.+?)\s*$/);
     if (m) map.set(m[2], { hash: m[1].toLowerCase(), alg: algByLen[m[1].length], display: m[2] });
@@ -1091,12 +1101,30 @@ async function verifyCMS(cms, pool, pending){
   if (cms.sidIssuer){
     signer = allCerts.find(c => bytesEqual(c.issuerBytes, cms.sidIssuer) && c.serialHex.replace(/^0+/,"") === cms.sidSerial.replace(/^0+/,""));
   }
-  if (!signer){ out.steps.push(["bad","Signer certificate not found in CMS or provided files"]); return out; }
+  if (!signer){
+    // The subjectKeyIdentifier sid form is parsed past but unsupported;
+    // saying so beats a generic not-found when it is the actual cause.
+    out.steps.push(["bad", cms.sidIssuer
+      ? "Signer certificate not found in CMS or provided files"
+      : "Signer is identified by SubjectKeyIdentifier, which this tool does not support; a signature using issuerAndSerialNumber is required"]);
+    return out;
+  }
+  if (cms.signedAttrsForVerify && !cms.msgDigestAttr){
+    out.steps.push(["bad","CMS signedAttrs are missing the required messageDigest attribute (RFC 5652 11.2)"]);
+    return out;
+  }
+  out.steps.push(["info","Signature file: "+vState.cmsName]);
   out.steps.push(["ok","Signer: "+(signer.subjectCN||"(no CN)")]);
   if (signer.notAfter < new Date())
     out.steps.push(["warn","Signer certificate expired "+signer.notAfter.toISOString().slice(0,10)]);
   if (signer.notBefore > new Date())
     out.steps.push(["warn","Signer certificate not yet valid until "+signer.notBefore.toISOString().slice(0,10)]);
+  // digitalSignature is bit 0 (0x80), nonRepudiation bit 1 (0x40). A
+  // signer whose keyUsage permits neither is one openssl cms -verify
+  // rejects outright ("unsuitable certificate purpose"); shown here as
+  // a warning since the fingerprint step, not the tool, confers trust.
+  if (signer.keyUsageBits !== null && (signer.keyUsageBits & 0xC0) === 0)
+    out.steps.push(["warn","Signer certificate keyUsage does not permit signing (no digitalSignature or nonRepudiation)"]);
 
   const hashName = DIGEST_OIDS[cms.digestAlgOID];
   if (!hashName){ out.steps.push(["bad","Unsupported digest algorithm OID "+cms.digestAlgOID]); return out; }
@@ -1106,12 +1134,7 @@ async function verifyCMS(cms, pool, pending){
   // direct signature verification otherwise.
   let eContent = cms.eContent;
   if (!eContent){
-    // The multipart/signed content part, when present, is the primary
-    // candidate; user-dropped files follow.
-    const sources = vState.smimeContent
-      ? [["(S/MIME signed content)", vState.smimeContent], ...(pending || [])]
-      : [...(pending || [])];
-    if (!sources.length){
+    if (!pending || !pending.size){
       out.steps.push(["bad","Detached signature: drop the signed content file (the hash manifest) alongside the signature file"]);
       return out;
     }
@@ -1132,6 +1155,11 @@ async function verifyCMS(cms, pool, pending){
       }
       return out;
     }
+    // The multipart/signed content part, when present, is the primary
+    // candidate; user-dropped files follow.
+    const sources = vState.smimeContent
+      ? [["(S/MIME signed content)", vState.smimeContent], ...pending]
+      : [...pending];
     outer:
     for (const [name, bytes] of sources){
       // Binary DER files (leading 0x30) are never S/MIME text; skip
@@ -1196,11 +1224,13 @@ async function verifyCMS(cms, pool, pending){
   const now = new Date();
   for (let depth = 0; depth < 6 && !current.selfSigned; depth++){
     const issuer = allCerts.find(c => bytesEqual(c.subjectBytes, current.issuerBytes));
-    // Scope: Basic Constraints cA is enforced; keyUsage keyCertSign,
-    // pathLenConstraint, and unknown-critical-extension rejection are
-    // not (full RFC 5280 path validation is beyond release
-    // verification). Issuer lookup takes the first subject match, so
-    // cross-signed CAs sharing a subject would need a try-all retry.
+    // Scope: Basic Constraints cA is enforced and the signer's
+    // keyUsage is checked (warn above); keyCertSign on issuers,
+    // pathLenConstraint, extended key usage, and unknown-critical-
+    // extension rejection are not (full RFC 5280 path validation is
+    // beyond release verification). Issuer lookup takes the first
+    // subject match, so cross-signed CAs sharing a subject would need
+    // a try-all retry.
     if (!issuer){ out.steps.push(["warn","Chain incomplete: issuer \""+(current.issuerCN||"?")+"\" not provided - drop the CA chain .pem"]); terminated = true; break; }
     // A chain link must itself be a CA (Basic Constraints cA=TRUE).
     // Without this check, any end-entity certificate could be used to
@@ -1255,6 +1285,7 @@ async function verifyCMS(cms, pool, pending){
 const rows = [];
 let sortKey = "name", sortDir = 1;
 let searchQuery = "";
+let lastFirstHit = null;
 const selected = new Set();
 
 /**
@@ -1310,7 +1341,11 @@ function render(){
   const sorted = [...rows].sort((a,b)=>{
     let va, vb;
     if (sortKey === "exp"){ va = a.notAfter?.getTime()||0; vb = b.notAfter?.getTime()||0; }
-    else { va = a.name.toLowerCase(); vb = b.name.toLowerCase(); }
+    else {
+      // Same collation as uniqueCerts, so screen order matches export
+      // order for non-ASCII names.
+      return a.name.toLowerCase().localeCompare(b.name.toLowerCase()) * sortDir;
+    }
     return va < vb ? -sortDir : va > vb ? sortDir : 0;
   });
 
@@ -1506,7 +1541,11 @@ document.getElementById("search").addEventListener("input", e=>{
   render();
   if (searchQuery){
     const first = document.querySelector("tbody tr.hit");
-    if (first && first.scrollIntoView) first.scrollIntoView({block:"center"});
+    // Scrolling on every keystroke yanks the page (and can carry the
+    // search box out of view); scroll only when the first hit moves.
+    const firstKey = first ? (first.querySelector("td.certname") || {dataset:{}}).dataset.id : null;
+    if (first && first.scrollIntoView && firstKey !== lastFirstHit) first.scrollIntoView({block:"center"});
+    lastFirstHit = firstKey;
   }
 });
 
@@ -1648,8 +1687,9 @@ function certFileBase(r){
 
 /**
  * Export set: source rows sorted by name with exact byte-level
- * duplicates removed (first occurrence wins). Duplicates commonly
- * arise when the same CA appears in multiple imported bundles.
+ * duplicates removed (first occurrence wins). Import already dedups
+ * globally, so this pass finds nothing today; it stays as defense in
+ * depth so exports remain duplicate-free if that invariant changes.
  */
 function uniqueCerts(){
   const seen = new Set();
