@@ -73,12 +73,12 @@
   dialog#guide::backdrop{background:rgba(0,0,0,.6)}
   .guide-h{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;background:#2c3849;border-bottom:1px solid var(--line);position:sticky;top:0}
   .guide-h b{font-size:13px;letter-spacing:.08em;text-transform:uppercase}
-  .guide-b{padding:6px 22px 20px;overflow-y:auto;max-height:calc(90vh - 50px);font-size:13.5px;line-height:1.55;background:var(--panel2)}
-  .guide-b h2{font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin:20px 0 6px;border-bottom:1px solid var(--line);padding-bottom:4px}
+  .guide-b{padding:6px 22px 20px;overflow-y:auto;max-height:calc(90vh - 50px);font-size:13.5px;line-height:1.55;background:#ffffff;color:#111417}
+  .guide-b h2{font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:#1f5faf;margin:20px 0 6px;border-bottom:1px solid #c8ccd2;padding-bottom:4px}
   .guide-b p{margin:7px 0}
   .guide-b ul,.guide-b ol{margin:6px 0 6px 22px}
   .guide-b li{margin:4px 0}
-  .guide-b code{font-family:var(--mono);font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:2px;padding:1px 5px}
+  .guide-b code{font-family:var(--mono);font-size:12px;background:#eef0f3;border:1px solid #c8ccd2;border-radius:2px;padding:1px 5px}
 
   /* section panels */
   .panel{border:1px solid var(--line);border-radius:4px;background:var(--panel);margin-bottom:18px;overflow:hidden;box-shadow:0 4px 18px rgba(0,0,0,.7),0 1px 3px rgba(0,0,0,.5)}
@@ -2246,8 +2246,10 @@ for (const [side, zoneId, fileId, clearId] of [["ref","cmpZoneRef","cmpFileRef",
    same bytes every export writes. Copy feedback is a color flash; the
    button label never changes, so the layout never shifts. */
 const pemDlg = document.getElementById("pemview");
+// No trailing newline: this string is pasted, not written to a file,
+// and a trailing newline pastes as a blank line. File exports keep it.
 function certToPem(r){
-  return "-----BEGIN CERTIFICATE-----\n"+b64Wrap(r.raw)+"\n-----END CERTIFICATE-----\n";
+  return "-----BEGIN CERTIFICATE-----\n"+b64Wrap(r.raw)+"\n-----END CERTIFICATE-----";
 }
 document.getElementById("tbody").addEventListener("click", e=>{
   const cell = e.target.closest ? e.target.closest("td.certname") : null;
@@ -2262,10 +2264,12 @@ document.getElementById("pemCopy").addEventListener("click", async ()=>{
   const btn = document.getElementById("pemCopy");
   const body = document.getElementById("pemBody");
   let ok = false;
+  // Clipboard API needs a secure context and can be denied; fall back
+  // to select-and-copy, then drop the selection it leaves behind.
   try { await navigator.clipboard.writeText(body.value); ok = true; }
-  catch(_){
+  catch(e){
     body.select();
-    try { ok = document.execCommand("copy"); } catch(_){ ok = false; }
+    try { ok = document.execCommand("copy"); } catch(e){ ok = false; }
     window.getSelection().removeAllRanges();
   }
   if (ok){
