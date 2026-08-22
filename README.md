@@ -16,7 +16,7 @@ Usage: Open `Certificate Report Bundle Tool.html` in a modern browser.
 
 **Report.** One row per certificate: subject, issuer, validity dates, serial number, key and signature algorithms, SHA-1 thumbprint, OCSP and CRL URLs, and certificate type. Expired certificates are flagged in red. The search box highlights matching rows across all columns, including serials and thumbprints. Checkboxes select specific rows for export.
 
-**Compare** Diffs two certificate sets in a report-style table. 
+**Compare.** Diffs two certificate sets in a report-style table. 
 
 **Export.** Exports include the selected certificates, or all certificates if none are selected, with any duplicates removed automatically if present. Available export formats: a single certificate as DER (.cer), a concatenated PEM bundle suitable for use as a CA file, a DER-encoded PKCS#7 bundle (.p7b), CSV, and a standalone HTML copy of the report. A status line under the Report header confirms each export.
 
