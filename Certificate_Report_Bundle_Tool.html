@@ -708,7 +708,7 @@ function parseCertificate(bytes){
     // serials copied from the report match openssl output. serialHex
     // keeps the raw content octets for SignerIdentifier comparison.
     serialHex: [...contentOf(bytes, serialNode)].map(x=>x.toString(16).padStart(2,"0")).join(""),
-    serialDisplay: (h => h.length > 2 && h.startsWith("00") && parseInt(h[2],16) >= 8 ? h.slice(2) : h)([...contentOf(bytes, serialNode)].map(x=>x.toString(16).padStart(2,"0")).join("")),
+    serialDisplay: stripSerialPad([...contentOf(bytes, serialNode)].map(x=>x.toString(16).padStart(2,"0")).join("")),
     sigAlgOID, sigAlgParams, signature
   };
 }
@@ -840,7 +840,10 @@ function certsFromDER(bytes, filename){
     // that is not a certificate is skipped once at least one
     // certificate has been read, so a partial import can never leave
     // the report and the error notice disagreeing. A first member that
-    // fails keeps its parse error as the file's diagnostic.
+    // fails keeps its parse error as the file's diagnostic. Malformed
+    // bytes (not a readable SEQUENCE) remain fatal for the whole file
+    // via the trailing-data throw above: a skip is for well-formed
+    // non-certificates, a corrupt byte stream is not a bundle.
     const slice = bytes.subarray(node.start, node.end);
     try { parseCertificate(slice); }
     catch(e){
@@ -1345,13 +1348,9 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
   // CMS-embedded certificates and the externally provided pool.
   let signer = null;
   if (cms.sidIssuer){
-    // At most one sign-padding 00 is stripped, and only when the next
-    // byte's high bit is set, mirroring serialDisplay: stripping all
-    // leading zeros would conflate 0x00FF with 0xFF and erase genuine
-    // leading-zero serials. Both sides are DER, so this normalization
-    // is the only legitimate difference.
-    const ps = h => h.length > 2 && h.startsWith("00") && parseInt(h[2],16) >= 8 ? h.slice(2) : h;
-    signer = allCerts.find(c => bytesEqual(c.issuerBytes, cms.sidIssuer) && ps(c.serialHex) === ps(cms.sidSerial));
+    // Both sides are DER, so sign padding is the only legitimate
+    // difference; stripSerialPad normalizes it identically for both.
+    signer = allCerts.find(c => bytesEqual(c.issuerBytes, cms.sidIssuer) && stripSerialPad(c.serialHex) === stripSerialPad(cms.sidSerial));
   }
   if (!signer){
     // The subjectKeyIdentifier sid form is parsed past but unsupported;
@@ -1497,10 +1496,14 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
       // count must not change that severity. A mixture warns too: the
       // throwing candidate could be the genuine issuer, so fatal would
       // overclaim.
-      let threw = null, sawFalse = false;
+      let threw = null;
       for (const c of candidates){
         if (!c.isCA) continue;
-        try { if (await verifySig(c.spkiBytes, current.sigAlgOID, current.sigAlgParams, current.tbsBytes, current.signature, "SHA-256")){ issuer = c; break; } else sawFalse = true; }
+        // The SHA-256 argument is the fallback hash for a bare
+        // rsaEncryption signatureAlgorithm, nonconforming on
+        // certificates; every named algorithm OID carries its own
+        // hash, matching the CMS path's hashName fallback.
+        try { if (await verifySig(c.spkiBytes, current.sigAlgOID, current.sigAlgParams, current.tbsBytes, current.signature, "SHA-256")){ issuer = c; break; } }
         catch(e){ threw = e; }
       }
       if (!issuer){
@@ -1609,6 +1612,17 @@ function certType(r){
   if (r.isCA && r.selfSigned) return "Trust Anchors and Self-Signed";
   if (r.isCA) return "Intermediate and Issuing";
   return "End Entity";
+}
+
+/**
+ * Strip DER sign padding from a serial's hex: at most one leading 00,
+ * and only when the next byte's high bit is set. Shared by the
+ * serialDisplay field and the SignerIdentifier lookup so the two can
+ * never drift apart; stripping all leading zeros would conflate 0x00FF
+ * with 0xFF and erase genuine leading-zero serials.
+ */
+function stripSerialPad(h){
+  return h.length > 2 && h.startsWith("00") && parseInt(h[2],16) >= 8 ? h.slice(2) : h;
 }
 
 /**
@@ -2107,7 +2121,11 @@ async function saveBlob(data, type, defaultName){
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;
+  // In the document for the click: detached-anchor downloads have a
+  // history of browser-specific behavior.
+  document.body.appendChild(a);
   a.click();
+  a.remove();
   // Deferred: synchronous revocation can cancel the download in some
   // browsers before the click is fully processed.
   setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
