@@ -22,7 +22,7 @@ Usage: Open `Certificate Report Bundle Tool.html` in a modern browser.
 
 ## Notes
 
-- This tool does not perform revocation status. OCSP and CRL URLs captured from the certs and presented. 
+- This tool does not perform revocation status. OCSP and CRL URLs are captured from the certs and presented for review. 
 - Signed manifests must be in sha256sum, sha384sum, or sha512sum format. Signature files are recognized by the extensions `.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, and `.sig`
 - Folder drag-and-drop is not supported for pages opened from disk. Select all the files directly and drop them into the tool.
 
