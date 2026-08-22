@@ -321,7 +321,7 @@
     <p>To verify a release, drop all of its files into the zone: the signature file, the chain file if there is one, and the bundle files. The tool checks the manifest signature, builds the signer's chain, and compares every file against the signed manifest. Problems are marked in red, warnings in amber, and each file row shows the manifest hash next to the computed one.</p>
     <p>The tool never trusts the root certificate, since it came in the same download. It shows the root's fingerprints instead. Compare one of them against the value the issuing authority publishes, and the release is verified once that matches and everything else is clean.</p>
     <p>Use the Import buttons in the results to send a verified file's certificates to the report without dropping it again.</p>
-    <p>Signature files are recognized by their extension (<code>.sha256</code>, <code>.sha384</code>, <code>.sha512</code>, <code>.p7s</code>, <code>.p7m</code>, <code>.sig</code>), and the manifest must be sha256sum, sha384sum, or sha512sum output. Attached and detached signatures both work, with RSA PKCS#1 v1.5, RSA-PSS, or ECDSA on P-256, P-384, or P-521. Co-signed releases are checked against the first signer only, and chain building assumes v3 certificates: an issuer without Basic Constraints is rejected as a non-CA.</p>
+    <p>Signature files are recognized by their extension (<code>.sha256</code>, <code>.sha384</code>, <code>.sha512</code>, <code>.p7s</code>, <code>.p7m</code>, <code>.sig</code>), and the manifest must be sha256sum, sha384sum, or sha512sum output. Attached and detached signatures both work, with RSA PKCS#1 v1.5, RSA-PSS, or ECDSA on P-256, P-384, or P-521. Co-signed releases are checked against the first signer only, and chain building assumes v3 certificates: an issuer without Basic Constraints is rejected as a non-CA, while issuer keyUsage and extended key usage are not evaluated; the root fingerprint comparison remains the trust decision. Files are read fully into memory for hashing, so multi-gigabyte bundle files may fail in a browser-dependent way.</p>
 
     <h2>Import</h2>
     <p>Drop certificate files into the zone. DER, PEM, headerless Base64, and PKCS#7 bundles are all accepted, and bundles expand to one row per certificate. Certificates already in the report are skipped, so the same bundle in two encodings won't create duplicates.</p>
@@ -452,6 +452,8 @@ function contentOf(b, node){ return b.subarray(node.contentStart, node.end); }
  * under 80 => 1.(v-40), otherwise 2.(v-80); it may itself be
  * multi-byte for large joint-iso arcs (X.690 8.19).
  */
+// Subidentifiers above 2^53 lose precision in the multiply-accumulate;
+// this string is display-only, and matching uses raw DER throughout.
 function decodeOID(bytes){
   if (!bytes.length) return "";
   const out = [];
@@ -725,7 +727,12 @@ function keyInfo(spki){
       const rsa = readTLV(bits, 0);
       let mod = contentOf(bits, children(bits, rsa)[0]);
       while (mod.length && mod[0] === 0) mod = mod.subarray(1);
-      return "RSA-" + (mod.length * 8);
+      // True bit length, matching openssl: byte count times eight
+      // overstates a modulus whose top byte has leading zero bits
+      // (a 2047-bit key would display as RSA-2048).
+      let top = mod.length ? mod[0] : 0, topBits = 0;
+      while (top){ topBits++; top >>= 1; }
+      return "RSA-" + ((mod.length - 1) * 8 + topBits);
     }
     if (oid === OID_EC_PUBKEY){
       const c = spkiCurve(spki);
@@ -811,6 +818,9 @@ function certsFromDER(bytes, filename){
     try { parseCertificate(slice); }
     catch(e){
       if (!out.length) throw e;
+      // Skips consume a label number, matching the PKCS#7 path, so a
+      // skip count correlates with the numbering either way.
+      n++;
       p = node.end;
       continue;
     }
@@ -2214,6 +2224,10 @@ function vRender(){
     const push = (html, name)=>trs.push([name && !vState.importable.has(name) ? 1 : 0, html]);
     const ordered = [...vState.pending.keys()];
     if (manifest && manifest.size){
+      // Per-row Import buttons and Import-all draw from the same
+      // eligibility set, so the verification verdict travels with
+      // every import path, single-click or bulk.
+      const eligSet = new Set(vImportEligible());
       // Group 1: manifest-listed files, compared with both values shown.
       for (const name of ordered){
         const hit = manifestEntry(manifest, name);
@@ -2230,12 +2244,13 @@ function vRender(){
           // signer expired, the signature was made in validity, and
           // the pipeline's warn line already carries the date.
           const ur = vState.lastResult.untrustedReason;
+          const imp = eligSet.has(name) ? name : null;
           if (ur)
-            push(frow(name, name, "st-warn", "Matches UNTRUSTED manifest ("+esc(ur)+")", expected, hash), name);
+            push(frow(imp, name, "st-warn", "Matches UNTRUSTED manifest ("+esc(ur)+")", expected, hash), name);
           else if (vState.lastResult.chainComplete)
-            push(frow(name, name, "st-ok", "\u2713 Matches signed manifest", expected, hash), name);
+            push(frow(imp, name, "st-ok", "\u2713 Matches signed manifest", expected, hash), name);
           else
-            push(frow(name, name, "st-warn", "Matches manifest (signer chain unverified)", expected, hash), name);
+            push(frow(imp, name, "st-warn", "Matches manifest (signer chain unverified)", expected, hash), name);
         } else {
           push(frow(null, name, "st-bad", "\u2717 HASH MISMATCH - altered or corrupted", expected, hash||"", "row-red"), name);
         }
@@ -2247,7 +2262,7 @@ function vRender(){
         const aliasSuffix = vState.lastResult.untrustedReason
           ? " (UNTRUSTED manifest: "+esc(vState.lastResult.untrustedReason)+")"
           : (vState.lastResult.chainComplete ? "" : " (signer chain unverified)");
-        push(frow(name, name,
+        push(frow(eligSet.has(name) ? name : null, name,
           aliasTrusted ? "st-ok" : "st-warn",
           (aliasTrusted ? "\u2713 " : "")+"Matches "+esc(entry.display || mkey)+" (filename differs)"+aliasSuffix,
           entry.hash, vState.fileHashes.get(name)), name);
@@ -2402,7 +2417,10 @@ async function vHandleFilesWork(fileList){
             // binary content parts would need raw byte slicing at the
             // boundary offsets and are out of scope.
             const parts = text.split(new RegExp("--"+mp[1].replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"(?:--)?\r?\n?")).slice(1);
-            const sigPart = parts.find(p=>/content-type:\s*application\/(x-)?pkcs7-signature/i.test(p));
+            // Matched against the part's header block only: a content
+            // body that happens to contain this header line must not
+            // be mistaken for the signature part.
+            const sigPart = parts.find(p=>/content-type:\s*application\/(x-)?pkcs7-signature/i.test(p.split(/\r?\n\r?\n/, 1)[0]));
             if (!sigPart) throw new Error("multipart/signed without a pkcs7-signature part");
             body = sigPart.replace(/^[\s\S]*?\r?\n\r?\n/, "");
             const content = parts.find(p=>p.trim() && p !== sigPart);
@@ -2490,10 +2508,11 @@ vdrop.addEventListener("drop", e=>vHandleFiles([...e.dataTransfer.files]));
  * import drop zone.
  */
 /**
- * Files eligible for Import-all: certificate-bearing files excluding
- * any whose manifest hash comparison failed. The per-row buttons apply
- * the same rule (a mismatch row renders without one), so the one-click
- * path can never import content the manifest just rejected.
+ * The single import-eligibility rule: certificate-bearing files
+ * excluding any covered by the manifest (by name or content alias)
+ * that mismatched or fall under an untrusted manifest. Both the
+ * per-row buttons and Import-all render from this set, so no import
+ * path can carry content the verification verdict rejected.
  */
 function vImportEligible(){
   const manifest = vState.lastResult ? vState.lastResult.manifest : null;
