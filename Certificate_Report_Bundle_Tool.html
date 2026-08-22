@@ -41,7 +41,7 @@
   .titlebar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
   .titlebtns{display:flex;gap:10px}
   dialog#compare{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.7);padding:0;width:96vw;max-width:96vw;max-height:90vh;margin:auto;overflow:hidden}
-  dialog#compare::backdrop{background:rgba(0,0,0,.6)}
+  dialog#compare::backdrop{background:rgba(0,0,0,.82);backdrop-filter:blur(2px)}
   .cmp-b{padding:14px 22px 20px;overflow-y:auto;max-height:calc(90vh - 50px)}
   .cmp-zones{display:flex;gap:14px}
   .cmp-side{flex:1;min-width:0}
@@ -70,7 +70,7 @@
   .cmp-zone.zone-amber .zcount{color:#ffc94d}
   h1{font-size:17px;font-weight:600;letter-spacing:.03em}
   dialog#guide{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.7);padding:0;width:75vw;max-width:none;max-height:90vh;margin:auto;overflow:hidden}
-  dialog#guide::backdrop{background:rgba(0,0,0,.6)}
+  dialog#guide::backdrop{background:rgba(0,0,0,.82);backdrop-filter:blur(2px)}
   .guide-h{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;background:#2c3849;border-bottom:1px solid var(--line);position:sticky;top:0}
   .guide-h b{font-size:13px;letter-spacing:.08em;text-transform:uppercase}
   .guide-b{padding:6px 22px 20px;overflow-y:auto;max-height:calc(90vh - 50px);font-size:13.5px;line-height:1.55;background:#ffffff;color:#111417}
@@ -129,7 +129,7 @@
      viewports the 64-column body scrolls horizontally, and Copy is
      unaffected. */
   dialog#pemview{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.7);padding:0;width:19vw;max-width:none;margin:auto;overflow:hidden}
-  dialog#pemview::backdrop{background:rgba(0,0,0,.6)}
+  dialog#pemview::backdrop{background:rgba(0,0,0,.82);backdrop-filter:blur(2px)}
   #pemBody{display:block;width:100%;height:60.5vh;background:#ffffff;color:#111417;border:none;resize:none;padding:16px 20px;font-family:var(--mono);font-size:12px;line-height:1.45;white-space:pre;overflow:auto}
   #pemBody:focus{outline:none}
   #pemCopy.done,#bClear.done{background:#2d6642;border-color:#478a63}
@@ -502,24 +502,21 @@ function decodeString(b, node){
  */
 function decodeTime(b, node){
   const s = decodeString(b, node).trim();
+  let Y,M,D,h,m,sec;
+  if (node.tag === 23){ // UTCTime YYMMDDHHMMSSZ
+    const yy = parseInt(s.slice(0,2),10);
+    Y = yy < 50 ? 2000+yy : 1900+yy;
+    M=+s.slice(2,4); D=+s.slice(4,6); h=+s.slice(6,8)||0; m=+s.slice(8,10)||0; sec=+s.slice(10,12)||0;
+  } else {          // GeneralizedTime YYYYMMDDHHMMSSZ
+    Y=+s.slice(0,4); M=+s.slice(4,6); D=+s.slice(6,8); h=+s.slice(8,10)||0; m=+s.slice(10,12)||0; sec=+s.slice(12,14)||0;
+  }
   // RFC 5280 4.1.2.5 mandates Z, but a nonconforming +-HHMM offset is
   // honored rather than silently read as UTC, which would display a
   // shifted validity with no indication. Throwing here would reject an
-  // otherwise-usable certificate over a display field. The offset is
-  // stripped before field slicing: with seconds omitted as well, the
-  // seconds slice would otherwise land on "+H" and read as a digit.
+  // otherwise-usable certificate over a display field.
   let offMin = 0;
   const off = s.match(/([+-])(\d{2})(\d{2})$/);
   if (off) offMin = (off[1] === "-" ? -1 : 1) * (+off[2]*60 + +off[3]);
-  const f = off ? s.slice(0, -5) : s;
-  let Y,M,D,h,m,sec;
-  if (node.tag === 23){ // UTCTime YYMMDDHHMMSSZ
-    const yy = parseInt(f.slice(0,2),10);
-    Y = yy < 50 ? 2000+yy : 1900+yy;
-    M=+f.slice(2,4); D=+f.slice(4,6); h=+f.slice(6,8)||0; m=+f.slice(8,10)||0; sec=+f.slice(10,12)||0;
-  } else {          // GeneralizedTime YYYYMMDDHHMMSSZ
-    Y=+f.slice(0,4); M=+f.slice(4,6); D=+f.slice(6,8); h=+f.slice(8,10)||0; m=+f.slice(10,12)||0; sec=+f.slice(12,14)||0;
-  }
   return new Date(Date.UTC(Y, M-1, D, h, m, sec) - offMin*60000);
 }
 
@@ -595,7 +592,7 @@ function parseCertificate(bytes){
   const tbs = rootKids[0];
   if (!tbs || tbs.tag !== 16) throw new Error("Missing tbsCertificate");
   // Certificate ::= SEQUENCE of exactly three children; guarded so a
-  // re-wrapped or cut structure surfaces as a descriptive error, not a
+  // re-wrapped or cut structure reads as what it is instead of a
   // property access on undefined in the outer-signature reads below.
   if (rootKids.length < 3) throw new Error("Certificate structure is truncated");
   const t = children(bytes, tbs);
@@ -667,10 +664,7 @@ function parseCertificate(bytes){
           // no restriction is different from restricted.
           const bs = readTLV(inner, 0);
           if (bs.tag === 3 && bs.len >= 2) keyUsageBits = inner[bs.contentStart + 1];
-        } else if (oid === OID_CRLDP && !crl){
-          // The !crl guard matches the AIA branch: duplicate extensions
-          // are illegal (RFC 5280 4.2); first-wins prevents a later empty
-          // duplicate from blanking the field.
+        } else if (oid === OID_CRLDP){
           const seq = readTLV(inner, 0);
           const uris = [];
           collectURIs(inner, seq, uris);
@@ -750,8 +744,7 @@ function keyInfo(spki){
       // True bit length, matching openssl: byte count times eight
       // overstates a modulus whose top byte has leading zero bits
       // (a 2047-bit key would display as RSA-2048).
-      if (!mod.length) return "";
-      let top = mod[0], topBits = 0;
+      let top = mod.length ? mod[0] : 0, topBits = 0;
       while (top){ topBits++; top >>= 1; }
       return "RSA-" + ((mod.length - 1) * 8 + topBits);
     }
@@ -923,8 +916,7 @@ function extractCertBuffers(buf, filename){
     return certsFromDER(b64ToBytes(text), filename);
   }
   // openssl x509 -trustout armor carries auxiliary trust data after
-  // the certificate; the diagnostic names the format rather than
-  // claiming the file is not PEM.
+  // the certificate; naming it beats claiming the file is not PEM.
   if (/-----BEGIN TRUSTED CERTIFICATE-----/.test(text))
     throw new Error("TRUSTED CERTIFICATE PEM is not supported; re-export with openssl x509");
   throw derError || new Error("Unrecognized format (not DER, PKCS#7, PEM, or base64)");
@@ -1026,8 +1018,7 @@ function derSigToRaw(sig, size){
   const [rN, sN] = children(sig, root);
   /* Strip leading zero octets and left-pad an INTEGER to curve size.
      Oversize after stripping means the value cannot belong to the
-     curve; a named error replaces the RangeError a negative offset
-     would raise. */
+     curve; naming it beats the RangeError a negative offset raises. */
   function fix(node){
     let c = sig.subarray(node.contentStart, node.end);
     while (c.length > size && c[0] === 0) c = c.subarray(1);
@@ -1131,7 +1122,7 @@ function parseCMS(bytes){
   const sk = children(bytes, sd);
   // Minimum SignedData: version, digestAlgorithms,
   // encapContentInfo, signerInfos (RFC 5652 5.1); certificates and
-  // crls are optional. Guarded so truncation surfaces descriptively.
+  // crls are optional. Guarded so truncation reads as what it is.
   if (sk.length < 4) throw new Error("SignedData is truncated");
   let idx = 0;
   idx++; // CMSVersion
@@ -1210,11 +1201,9 @@ function parseCMS(bytes){
       const attrOID = decodeOID(contentOf(bytes, ak[0]));
       if (attrOID === OID_MSGDIGEST){
         const val = children(bytes, ak[1])[0];
-        if (!val) throw new Error("messageDigest attribute value is empty");
         msgDigestAttr = toHex(contentOf(bytes, val));
       } else if (attrOID === OID_CONTENTTYPE){
         const val = children(bytes, ak[1])[0];
-        if (!val) throw new Error("content-type attribute value is empty");
         contentTypeAttr = decodeOID(contentOf(bytes, val));
       }
     }
@@ -1326,15 +1315,6 @@ function untrustedManifest(out, eContent, reason){
   return out;
 }
 
-/**
- * Verification pipeline over a parsed CMS: locate the signer by
- * issuerAndSerialNumber, resolve attached or detached content, check
- * the messageDigest and content-type signed attributes (RFC 5652 11.1,
- * 11.2), verify the signature, walk the issuer chain, and parse the
- * manifest. Returns display steps plus the manifest, verdict, and
- * chain state; fatal exits after content resolution attach the
- * manifest as untrusted for triage.
- */
 async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
   const out = { steps: [], manifest: null, ok: false, contentName: null, chainComplete: false };
   // Named first so every failure below is attributable to a specific
@@ -1355,8 +1335,7 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
   }
   if (!signer){
     // The subjectKeyIdentifier sid form is parsed past but unsupported;
-    // naming it is more useful than a generic not-found when it is the
-    // actual cause.
+    // saying so beats a generic not-found when it is the actual cause.
     out.steps.push(["bad", cms.sidIssuer
       ? "Signer certificate not found in CMS or provided files"
       : "Signer is identified by SubjectKeyIdentifier, which this tool does not support; a signature using issuerAndSerialNumber is required"]);
@@ -1581,12 +1560,10 @@ const selected = new Set();
  */
 const chipColors = new Map();
 
-/**
- * CSS class for a category's chip, assigning a palette slot on first
- * use. Never cleared, including by report Clear: a category keeps its
- * color across clears within the session, and growth is bounded by the
- * number of distinct categories typed.
- */
+/** CSS class for a category's chip, assigning a palette slot on first
+    use. Never cleared, including by report Clear: a category keeps its
+    color across clears within the session, and growth is bounded by
+    the number of distinct categories a person actually types. */
 function chipClass(cat){
   if (!cat) return "chip";
   const k = cat.toLowerCase();
@@ -1790,7 +1767,6 @@ function handleFiles(fileList){
   importQueue = run.catch(()=>{});
   return run;
 }
-/** Queued body of handleFiles; one drop at a time end to end. */
 async function handleFilesWork(fileList){
   errBox.style.display = "none"; errBox.innerHTML = "";
   // An export notice describes the report as it was exported; new
@@ -2344,7 +2320,6 @@ function vRender(){
   if (vState.pending.size){
     parts.push('<div class="vfiles">');
     const eligible = vImportEligible();
-    const eligSet = new Set(eligible);
     if (eligible.length > 1)
       parts.push('<div class="vline"><button class="vimp" data-all="1" title="Add every certificate file below to the report">Import all certificate files ('+eligible.length+')</button></div>');
     /* One row per file, in the same table format as the report:
@@ -2371,6 +2346,7 @@ function vRender(){
       // Per-row Import buttons and Import-all draw from the same
       // eligibility set, so the verification verdict travels with
       // every import path, single-click or bulk.
+      const eligSet = new Set(vImportEligible());
       // Group 1: manifest-listed files, compared with both values shown.
       for (const name of ordered){
         const hit = manifestEntry(manifest, name);
@@ -2528,11 +2504,6 @@ function vHandleFiles(fileList){
   vIntakeQueue = run.catch(()=>{});
   return run;
 }
-/**
- * Queued body of vHandleFiles: classify each dropped file as a
- * signature or content, cache content digests, and re-run the
- * verification pipeline against everything held.
- */
 async function vHandleFilesWork(fileList){
   for (const f of fileList){
     // Read inside a guard: a file moved or modified between selection
@@ -2606,10 +2577,10 @@ async function vHandleFilesWork(fileList){
         // ordinary content and a loaded signature stays loaded. The
         // note holds the display text; read failures reuse the same
         // channel with their own message.
-        // The parse diagnostic is included in the note: the guide's
-        // remediation for messages like "Indefinite length not allowed
-        // in DER" is only actionable if the message is visible in the
-        // verify zone, where signature files are dropped.
+        // The parse diagnostic rides along: the guide's remediation
+        // for messages like "Indefinite length not allowed in DER"
+        // is only actionable if the message is visible where release
+        // verifiers actually drop files.
         vState.sigNotes.set(f.name,
           "no signature found inside ("+e.message+"); treated as content"
           + (vState.cms ? " - the previously loaded signature remains in effect" : ""));
@@ -2696,7 +2667,6 @@ function vImportFiles(names){
   importQueue = run.catch(()=>{});
   return run;
 }
-/** Queued body of vImportFiles; shares the report import queue. */
 async function vImportFilesWork(names){
   const en = document.getElementById("exportNotice");
   en.style.display = "none"; en.textContent = "";
@@ -2792,7 +2762,6 @@ function cmpHandleFiles(side, fileList){
   cmpQueue = run.catch(()=>{});
   return run;
 }
-/** Queued body of cmpHandleFiles; one side's drop at a time. */
 async function cmpHandleFilesWork(side, fileList){
   // Errors persist per side so a Show-all toggle or a clear of the
   // other side does not drop them; a side's next drop replaces its
@@ -3002,7 +2971,6 @@ const pemDlg = document.getElementById("pemview");
 function certToPem(r){
   return "-----BEGIN CERTIFICATE-----\n"+b64Wrap(r.raw)+"\n-----END CERTIFICATE-----";
 }
-/** Open the PEM dialog for the report row behind a name cell. */
 function pemOpenFromCell(cell){
   const r = rows.find(x=>x.id === +cell.dataset.id);
   if (!r) return;
