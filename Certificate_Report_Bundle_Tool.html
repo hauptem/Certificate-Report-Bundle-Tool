@@ -124,6 +124,10 @@
   #compareBtn,#guideBtn,#vclear,#clear,#cmpClose,#guideClose,#pemClose,#pemCopy{width:92px;padding-left:0;padding-right:0;text-align:center}
   td.certname{cursor:pointer}
   td.certname:hover{text-decoration:underline;color:#1f5faf}
+  /* PEM dialog width is viewport-relative by design and tuned by eye
+     against a 4096-bit certificate on a large display; on narrower
+     viewports the 64-column body scrolls horizontally, and Copy is
+     unaffected. */
   dialog#pemview{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.7);padding:0;width:19vw;max-width:none;margin:auto;overflow:hidden}
   dialog#pemview::backdrop{background:rgba(0,0,0,.6)}
   #pemBody{display:block;width:100%;height:60.5vh;background:#ffffff;color:#111417;border:none;resize:none;padding:16px 20px;font-family:var(--mono);font-size:12px;line-height:1.45;white-space:pre;overflow:auto}
@@ -394,11 +398,17 @@ function readTLV(b, off){
   let tag = first & 0x1f;
   let p = off + 1;
   if (tag === 0x1f){
+    // High-tag-number form: base-128 continuation bytes. Capped at 4
+    // bytes and required to terminate inside the buffer, matching the
+    // length field's fail-loud rules below.
     tag = 0;
+    let n = 0, done = false;
     while (p < b.length){
+      if (++n > 4) throw new Error("Tag too large");
       tag = (tag << 7) | (b[p] & 0x7f);
-      if (!(b[p++] & 0x80)) break;
+      if (!(b[p++] & 0x80)){ done = true; break; }
     }
+    if (!done) throw new Error("Truncated tag");
   }
   if (p >= b.length) throw new Error("Truncated length");
   let len = b[p++];
@@ -1097,6 +1107,10 @@ function manifestEntry(manifest, name){
  *            ok:boolean, contentName:string|null}}
  *          steps: ordered ["ok"|"warn"|"bad", message] pairs for
  *          display. ok: true only if every fatal check passed.
+ *          cmsName and smimeContent arrive as parameters (the loaded
+ *          signature's filename for display, and the multipart
+ *          content-part candidate) so this section reads no UI state
+ *          and extracts cleanly for testing.
  *          contentName: the matched content file for detached mode.
  *          chainComplete: true only when the chain reached a verified
  *          self-signed root; vRender withholds the green file verdict
@@ -1117,7 +1131,7 @@ function manifestEntry(manifest, name){
  * out-of-band comparison; roots are never implicitly trusted, so this
  * guidance always accompanies a verified chain.
  */
-async function verifyCMS(cms, pool, pending){
+async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
   const out = { steps: [], manifest: null, ok: false, contentName: null, chainComplete: false };
   const allCerts = cms.certs.concat(pool);
   // Locate the signer certificate by issuer and serial number among
@@ -1138,7 +1152,7 @@ async function verifyCMS(cms, pool, pending){
     out.steps.push(["bad","CMS signedAttrs are missing the required messageDigest attribute (RFC 5652 11.2)"]);
     return out;
   }
-  out.steps.push(["info","Signature file: "+vState.cmsName]);
+  out.steps.push(["info","Signature file: "+cmsName]);
   out.steps.push(["ok","Signer: "+(signer.subjectCN||"(no CN)")]);
   if (signer.notAfter < new Date())
     out.steps.push(["warn","Signer certificate expired "+signer.notAfter.toISOString().slice(0,10)]);
@@ -1182,8 +1196,8 @@ async function verifyCMS(cms, pool, pending){
     }
     // The multipart/signed content part, when present, is the primary
     // candidate; user-dropped files follow.
-    const sources = vState.smimeContent
-      ? [["(S/MIME signed content)", vState.smimeContent], ...pending]
+    const sources = smimeContent
+      ? [["(S/MIME signed content)", smimeContent], ...pending]
       : [...pending];
     outer:
     for (const [name, bytes] of sources){
@@ -1580,11 +1594,14 @@ document.getElementById("search").addEventListener("input", e=>{
 });
 
 document.querySelectorAll("th.sortable").forEach(th=>{
-  th.addEventListener("click", ()=>{
+  th.setAttribute("tabindex","0");
+  const toggle = ()=>{
     const k = th.dataset.sort;
     if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
     render();
-  });
+  };
+  th.addEventListener("click", toggle);
+  th.addEventListener("keydown", e=>{ if (e.key==="Enter"||e.key===" "){ e.preventDefault(); toggle(); }});
 });
 document.getElementById("clear").addEventListener("click", ()=>{
   rows.length = 0; selected.clear();
@@ -1903,12 +1920,12 @@ function vRender(){
   // Files with signature extensions that did not parse as CMS are
   // reported as notes: for a plain manifest next to its .sig this is
   // informational, for a corrupt signature it is the only evidence.
-  for (const name of vState.sigNotes.keys()){
+  for (const [name, msg] of vState.sigNotes){
     // Once the file is identified as the signed content, the note has
     // served its purpose and would only mislabel the normal
     // release.sha256 + release.sha256.sig layout as a problem.
     if (vState.lastResult && vState.lastResult.contentName === name) continue;
-    parts.push('<div class="vline vwarn">\u26A0 '+esc(name)+' - no signature found inside; treated as content</div>');
+    parts.push('<div class="vline vwarn">\u26A0 '+esc(name)+' - '+esc(msg)+'</div>');
   }
   // lastResult renders even with cms null: a signature file that failed
   // to parse stores its error there, and that error must be shown
@@ -2027,7 +2044,7 @@ function vRender(){
  */
 async function vRun(){
   if (vState.cms){
-    try { vState.lastResult = await verifyCMS(vState.cms, vState.pool, vState.pending); }
+    try { vState.lastResult = await verifyCMS(vState.cms, vState.pool, vState.pending, vState.cmsName, vState.smimeContent); }
     catch(e){ vState.lastResult = { steps: [["bad","Verification failed: "+e.message]], manifest: null, ok: false }; }
   }
   vState.aliasMatch.clear();
@@ -2077,7 +2094,12 @@ async function vRun(){
  */
 async function vHandleFiles(fileList){
   for (const f of fileList){
-    const buf = await f.arrayBuffer();
+    // Read inside a guard: a file moved or modified between selection
+    // and read rejects here, and one bad read must not drop the rest
+    // of the batch. The note channel reports it.
+    let buf;
+    try { buf = await f.arrayBuffer(); }
+    catch(e){ vState.sigNotes.set(f.name, "could not be read; excluded from this drop"); continue; }
     let bytes = new Uint8Array(buf);
     if (/\.(sha256|sha384|sha512|p7s|p7m|sig)$/i.test(f.name)){
       let smimePart = null;
@@ -2118,15 +2140,23 @@ async function vHandleFiles(fileList){
         vState.cmsName = f.name;
         vState.smimeContent = smimePart;
         vState.fileHashes.clear();
+        // A prior drop of this name may have fallen through to pending
+        // as content (see the catch below); now that the name parses as
+        // a signature, that content-era state would ghost a Skipped row
+        // and leave stale certificates for the pool rebuild.
         vState.sigNotes.delete(f.name);
+        vState.pending.delete(f.name);
+        vState.fileCerts.delete(f.name);
+        vState.importable.delete(f.name);
         continue;
       } catch(e){
         // Not parseable as a signature. Plain sha256sum manifests
         // legitimately carry these extensions (release.sha256 next to
         // release.sha256.sig), so the file falls through to pending as
-        // ordinary content, a loaded signature stays loaded, and the
-        // note records why the file was not treated as one.
-        vState.sigNotes.set(f.name, e.message);
+        // ordinary content and a loaded signature stays loaded. The
+        // note holds the display text; read failures reuse the same
+        // channel with their own message.
+        vState.sigNotes.set(f.name, "no signature found inside; treated as content");
       }
     }
     // A re-dropped file replaces its pending bytes, so any cached
@@ -2258,8 +2288,10 @@ async function cmpHandleFiles(side, fileList){
   // them, and clearing a side clears its errors with it.
   cmpState.errs = [];
   for (const f of fileList){
-    const buf = new Uint8Array(await f.arrayBuffer());
+    // Read inside the try so a rejected read lands in errs like any
+    // parse failure instead of aborting the batch.
     try {
+      const buf = new Uint8Array(await f.arrayBuffer());
       for (const item of extractCertBuffers(buf, f.name)){
         const c = parseCertificate(item.bytes);
         const key = await digestHex("SHA-256", c.raw);
