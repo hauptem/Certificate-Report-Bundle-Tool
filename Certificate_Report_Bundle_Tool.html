@@ -628,6 +628,7 @@ function parseCertificate(bytes){
   // signatureAlgorithm AlgorithmIdentifier, signatureValue BIT STRING }.
   // Absent parameters and explicit NULL (tag 5) are both treated as none.
   const sigAlgKids = children(bytes, rootKids[1]);
+  if (!sigAlgKids.length) throw new Error("Empty signature AlgorithmIdentifier");
   const sigAlgOID = decodeOID(contentOf(bytes, sigAlgKids[0]));
   const sigAlgParams = sigAlgKids.length > 1 && sigAlgKids[1].tag !== 5 ? bytesOf(bytes, sigAlgKids[1]) : null;
   const sigBits = contentOf(bytes, rootKids[2]);
@@ -757,9 +758,12 @@ function keyInfo(spki){
 
 const OID_SIGNEDDATA = "1.2.840.113549.1.7.2";
 
-/** Decode Base64 text (whitespace tolerated) to bytes. */
+/** Decode Base64 text to bytes. Only whitespace is stripped: a body
+    corrupted with non-alphabet bytes must fail here in atob, where the
+    cause is named, not decode shifted and fail later with a DER error
+    pointing away from it. */
 function b64ToBytes(s){
-  const clean = s.replace(/[^A-Za-z0-9+/=]/g,"");
+  const clean = s.replace(/\s+/g,"");
   const bin = atob(clean);
   const out = new Uint8Array(bin.length);
   for (let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
@@ -1172,6 +1176,7 @@ function parseCMS(bytes){
   let sidIssuer = null, sidSerial = null;
   if (sid.tag === 16){
     const sc = children(bytes, sid);
+    if (sc.length < 2) throw new Error("Truncated issuerAndSerialNumber");
     sidIssuer = bytesOf(bytes, sc[0]);
     sidSerial = [...contentOf(bytes, sc[1])].map(x=>x.toString(16).padStart(2,"0")).join("");
   }
@@ -1440,13 +1445,19 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
     // exact single-path diagnostics below.
     let issuer = null;
     if (candidates.length > 1){
+      // A verifySig throw (unsupported link algorithm) and a false
+      // verdict are different facts; the single-candidate path treats
+      // the first as a warn and the second as fatal, and candidate
+      // count must not change that severity.
+      let threw = null, sawFalse = false;
       for (const c of candidates){
         if (!c.isCA) continue;
-        try { if (await verifySig(c.spkiBytes, current.sigAlgOID, current.sigAlgParams, current.tbsBytes, current.signature, "SHA-256")){ issuer = c; break; } }
-        catch(e){}
+        try { if (await verifySig(c.spkiBytes, current.sigAlgOID, current.sigAlgParams, current.tbsBytes, current.signature, "SHA-256")){ issuer = c; break; } else sawFalse = true; }
+        catch(e){ threw = e; }
       }
       if (!issuer){
         if (candidates.every(c=>!c.isCA)){ out.steps.push(["bad","Chain REJECTED: \""+(candidates[0].subjectCN||"?")+"\" is not a CA certificate (Basic Constraints) and cannot issue certificates"]); return untrustedManifest(out, eContent, "chain rejected"); }
+        if (threw && !sawFalse){ out.steps.push(["warn","Chain: "+threw.message]); terminated = true; break; }
         out.steps.push(["bad","Chain signature INVALID: \""+(current.subjectCN||"?")+"\" not properly signed by any of the "+candidates.filter(c=>c.isCA).length+" CA certificate(s) sharing the issuer subject"]);
         return untrustedManifest(out, eContent, "chain signature invalid");
       }
@@ -2536,9 +2547,13 @@ async function vHandleFilesWork(fileList){
         // ordinary content and a loaded signature stays loaded. The
         // note holds the display text; read failures reuse the same
         // channel with their own message.
-        vState.sigNotes.set(f.name, vState.cms
-          ? "no signature found inside; treated as content (the previously loaded signature remains in effect)"
-          : "no signature found inside; treated as content");
+        // The parse diagnostic rides along: the guide's remediation
+        // for messages like "Indefinite length not allowed in DER"
+        // is only actionable if the message is visible where release
+        // verifiers actually drop files.
+        vState.sigNotes.set(f.name,
+          "no signature found inside ("+e.message+"); treated as content"
+          + (vState.cms ? " - the previously loaded signature remains in effect" : ""));
       }
     }
     // A re-dropped file replaces its pending bytes, so any cached
