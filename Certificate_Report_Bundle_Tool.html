@@ -237,7 +237,7 @@
     <input id="search" type="search" placeholder="Search certificates" autocomplete="off">
     <span class="count" id="count">0 certificates</span>
     <span class="spacer"></span>
-    <button id="exportCer" class="export" disabled>Export .cer</button>
+    <button id="exportCer" class="export" disabled title="Export a single certificate">Export .cer</button>
     <button id="exportPem" class="export" disabled title="Export one or more certs in a single PEM file">Export PEM bundle</button>
     <button id="exportP7b" class="export" disabled title="Export one or more certs in a single P7B file">Export P7B bundle</button>
     <button id="export" class="export" disabled title="Export table to a .csv file">Export CSV</button>
@@ -589,12 +589,14 @@ function parseCertificate(bytes){
   const tbs = rootKids[0];
   if (!tbs || tbs.tag !== 16) throw new Error("Missing tbsCertificate");
   const t = children(bytes, tbs);
-  // Positional reads below assume the six mandatory tbsCertificate
-  // fields are present; a truncated tbs would otherwise surface as a
-  // property access on undefined instead of a descriptive error.
-  if (t.length < 6) throw new Error("Truncated tbsCertificate");
   let i = 0;
   if (t[i] && t[i].cls === 2 && t[i].tag === 0) i++;   // [0] EXPLICIT version, optional
+  // Positional reads below assume the six mandatory tbsCertificate
+  // fields follow the optional version; counting after the skip keeps
+  // the guard correct for both v1 and v3 layouts, so truncation
+  // surfaces as a descriptive error, not a property access on
+  // undefined.
+  if (t.length - i < 6) throw new Error("Truncated tbsCertificate");
   const serialNode = t[i++];                            // serialNumber INTEGER
   i++;                                                  // signature AlgorithmIdentifier (inner copy)
   const issuerNode = t[i++];
@@ -800,7 +802,19 @@ function certsFromDER(bytes, filename){
     let node = null;
     try { node = readTLV(bytes, p); } catch(e){ if (!out.length) throw e; }
     if (!node || node.tag !== 16) throw new Error("Trailing data after certificate");
-    out.push({ bytes: bytes.subarray(node.start, node.end), label: out.length ? filename+" ["+n+"]" : filename });
+    // Validated like the PKCS#7 and PEM members: a well-formed SEQUENCE
+    // that is not a certificate is skipped once at least one
+    // certificate has been read, so a partial import can never leave
+    // the report and the error notice disagreeing. A first member that
+    // fails keeps its parse error as the file's diagnostic.
+    const slice = bytes.subarray(node.start, node.end);
+    try { parseCertificate(slice); }
+    catch(e){
+      if (!out.length) throw e;
+      p = node.end;
+      continue;
+    }
+    out.push({ bytes: slice, label: out.length ? filename+" ["+n+"]" : filename });
     n++;
     p = node.end;
   }
@@ -835,8 +849,9 @@ function extractCertBuffers(buf, filename){
     const out = [];
     const multi = blocks.length > 1;
     blocks.forEach((m, idx)=>{
-      const der = b64ToBytes(m[2]);
       const base = multi ? filename+" ("+(idx+1)+")" : filename;
+      let der = null;
+      try { der = b64ToBytes(m[2]); } catch(e){ return; }
       if (m[1] === "CERTIFICATE"){
         // Validated here, matching the per-member tolerance of the
         // PKCS#7 path: a corrupt block is skipped rather than failing
@@ -845,11 +860,20 @@ function extractCertBuffers(buf, filename){
         try { parseCertificate(der); out.push({ bytes: der, label: base }); }
         catch(e){}
       }
-      else out.push(...certsFromDER(der, base));
+      else {
+        // Same per-block tolerance as CERTIFICATE blocks: a corrupt
+        // PKCS7 armor (including a Base64 body atob rejects) is
+        // skipped rather than failing valid blocks before it; an
+        // all-corrupt file hits the no-parseable-certificates throw.
+        try { out.push(...certsFromDER(der, base)); } catch(e){}
+      }
     });
     if (!out.length) throw new Error("No parseable certificates in PEM blocks");
     return out;
   }
+  // "MII" is the Base64 opening of a DER SEQUENCE 256+ bytes long; a
+  // certificate under 256 bytes would open "MIG", and none that small
+  // exists in practice.
   if (/^[\sA-Za-z0-9+/=]+$/.test(text) && text.trim().startsWith("MII")){
     return certsFromDER(b64ToBytes(text), filename);
   }
@@ -1051,6 +1075,10 @@ function parseCMS(bytes){
   const sd = children(bytes, explicit0)[0];
   if (!sd) throw new Error("CMS: empty SignedData content");
   const sk = children(bytes, sd);
+  // Minimum SignedData: version, digestAlgorithms,
+  // encapContentInfo, signerInfos (RFC 5652 5.1); certificates and
+  // crls are optional. Guarded so truncation reads as what it is.
+  if (sk.length < 4) throw new Error("SignedData is truncated");
   let idx = 0;
   idx++; // CMSVersion
   idx++; // digestAlgorithms SET
@@ -1379,7 +1407,7 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
     let ok = false;
     try { ok = await verifySig(issuer.spkiBytes, current.sigAlgOID, current.sigAlgParams, current.tbsBytes, current.signature, "SHA-256"); }
     catch(e){ out.steps.push(["warn","Chain: "+e.message]); terminated = true; break; }
-    if (!ok){ out.steps.push(["bad","Chain signature INVALID: \""+(current.subjectCN||"?")+"\" not properly signed by \""+(issuer.subjectCN||"?")+"\""]); return out; }
+    if (!ok){ out.steps.push(["bad","Chain signature INVALID: \""+(current.subjectCN||"?")+"\" not properly signed by \""+(issuer.subjectCN||"?")+"\""]); return untrustedManifest(out, eContent, "chain signature invalid"); }
     if (issuer.notAfter < now) out.steps.push(["warn","Chain cert expired: "+(issuer.subjectCN||"?")]);
     if (issuer.notBefore > now) out.steps.push(["warn","Chain cert not yet valid: "+(issuer.subjectCN||"?")]);
     current = issuer;
@@ -1395,7 +1423,7 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
     let rootSig = false;
     try { rootSig = await verifySig(current.spkiBytes, current.sigAlgOID, current.sigAlgParams, current.tbsBytes, current.signature, "SHA-256"); }
     catch(e){ out.steps.push(["warn","Root self-signature: "+e.message]); rootSig = null; }
-    if (rootSig === false){ out.steps.push(["bad","Root self-signature INVALID: \""+(current.subjectCN||"?")+"\" is corrupted or altered"]); return out; }
+    if (rootSig === false){ out.steps.push(["bad","Root self-signature INVALID: \""+(current.subjectCN||"?")+"\" is corrupted or altered"]); return untrustedManifest(out, eContent, "root self-signature invalid"); }
     out.steps.push(["ok", path.length > 1
       ? "Chain verified: "+path.join(" \u2192 ")
       : "Signer is self-signed; no chain to verify"]);
@@ -1554,7 +1582,6 @@ function render(){
   const single = (selected.size || rows.length) === 1;
   const cerBtn = document.getElementById("exportCer");
   cerBtn.disabled = !single;
-  cerBtn.title = "Export a single certificate";
 }
 
 /* Events */
