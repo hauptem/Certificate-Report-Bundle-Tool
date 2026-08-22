@@ -22,7 +22,7 @@ Fill in Category, Version, or Release Date before dropping to label everything i
 
 ## Report
 
-Each certificate is a row showing its subject, issuer, validity, serial, algorithms, thumbprint, revocation URLs, and type, with expired and not-yet-valid certificates flagged. Sort by clicking the Certificate Name or Expiration header, and use the search box to highlight matches anywhere in the table. Check rows to select them for export, or remove them individually with the button at the end of each row. Click a certificate's name to view its PEM in a popup with a Copy button, for pasting into anything that accepts PEM directly.
+Each certificate is a row showing its subject, issuer, validity, serial, algorithms, thumbprint, revocation URLs, and type, with expired and not-yet-valid certificates flagged. Sort by clicking the Certificate Name or Expiration header, and use the search box to highlight matches anywhere in the table; matching rows are also selected, so a search can feed an export directly. Check rows to select them for export, or remove them individually with the button at the end of each row. Click a certificate's name to view its PEM in a popup with a Copy button, for pasting into anything that accepts PEM directly.
 
 ## Compare
 

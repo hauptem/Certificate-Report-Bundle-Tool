@@ -121,7 +121,7 @@
   button.export:hover:not(:disabled){background:#34754d;border-color:#52996f}
   button:disabled{opacity:.4;cursor:default}
   button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-  #compareBtn,#guideBtn,#vclear,#clear,#cmpClose,#guideClose,#pemClose,#pemCopy{width:92px;padding-left:0;padding-right:0;text-align:center}
+  #compareBtn,#guideBtn,#vclear,#clear,#bClear,#cmpClose,#guideClose,#pemClose,#pemCopy{width:92px;padding-left:0;padding-right:0;text-align:center}
   td.certname{cursor:pointer}
   td.certname:hover{text-decoration:underline;color:#1f5faf}
   /* PEM dialog width is viewport-relative by design and tuned by eye
@@ -132,7 +132,7 @@
   dialog#pemview::backdrop{background:rgba(0,0,0,.6)}
   #pemBody{display:block;width:100%;height:60.5vh;background:#ffffff;color:#111417;border:none;resize:none;padding:16px 20px;font-family:var(--mono);font-size:12px;line-height:1.45;white-space:pre;overflow:auto}
   #pemBody:focus{outline:none}
-  #pemCopy.done{background:#2d6642;border-color:#478a63}
+  #pemCopy.done,#bClear.done{background:#2d6642;border-color:#478a63}
   #exportCer,#exportPem,#exportP7b,#export,#exportHtml{width:150px;padding-left:0;padding-right:0;text-align:center}
 
   .tablewrap{overflow-x:auto;background:#ffffff}
@@ -208,7 +208,7 @@
 </details>
 
 <details class="panel" open>
-  <summary class="panel-h"><span class="step">2</span> Import</summary>
+  <summary class="panel-h"><span class="step">2</span> Import<span class="spacer"></span><button id="bClear" type="button" title="Clear the three batch fields">Clear</button></summary>
   <div class="panel-b">
     <div class="batch">
       <div class="field">
@@ -328,7 +328,7 @@
     <p>Fill in Category, Version, or Release Date before dropping to label everything in that drop. Filenames like <code>certificates_pkcs7_v2_1_internal</code> fill Category and Version automatically when you leave them blank.</p>
 
     <h2>Report</h2>
-    <p>Each certificate is a row showing its subject, issuer, validity, serial, algorithms, thumbprint, revocation URLs, and type, with expired and not-yet-valid certificates flagged. Sort by clicking the Certificate Name or Expiration header, and use the search box to highlight matches anywhere in the table. Check rows to select them for export, or remove them individually with the button at the end of each row. Click a certificate's name to view its PEM in a popup with a Copy button, for pasting into anything that accepts PEM directly.</p>
+    <p>Each certificate is a row showing its subject, issuer, validity, serial, algorithms, thumbprint, revocation URLs, and type, with expired and not-yet-valid certificates flagged. Sort by clicking the Certificate Name or Expiration header, and use the search box to highlight matches anywhere in the table; matching rows are also selected, so a search can feed an export directly. Check rows to select them for export, or remove them individually with the button at the end of each row. Click a certificate's name to view its PEM in a popup with a Copy button, for pasting into anything that accepts PEM directly.</p>
 
     <h2>Compare</h2>
     <p>Compare, in the title bar, diffs two certificate sets. Drop the baseline on the Reference side and the set you're evaluating on the Comparison side; differences appear as a table once both sides have certificates. Matching uses the full subject, so same-named certificates from different organizations aren't confused.</p>
@@ -589,6 +589,10 @@ function parseCertificate(bytes){
   const tbs = rootKids[0];
   if (!tbs || tbs.tag !== 16) throw new Error("Missing tbsCertificate");
   const t = children(bytes, tbs);
+  // Positional reads below assume the six mandatory tbsCertificate
+  // fields are present; a truncated tbs would otherwise surface as a
+  // property access on undefined instead of a descriptive error.
+  if (t.length < 6) throw new Error("Truncated tbsCertificate");
   let i = 0;
   if (t[i] && t[i].cls === 2 && t[i].tag === 0) i++;   // [0] EXPLICIT version, optional
   const serialNode = t[i++];                            // serialNumber INTEGER
@@ -833,9 +837,17 @@ function extractCertBuffers(buf, filename){
     blocks.forEach((m, idx)=>{
       const der = b64ToBytes(m[2]);
       const base = multi ? filename+" ("+(idx+1)+")" : filename;
-      if (m[1] === "CERTIFICATE") out.push({ bytes: der, label: base });
+      if (m[1] === "CERTIFICATE"){
+        // Validated here, matching the per-member tolerance of the
+        // PKCS#7 path: a corrupt block is skipped rather than failing
+        // the file after earlier blocks already imported, which left
+        // the report and the error notice disagreeing.
+        try { parseCertificate(der); out.push({ bytes: der, label: base }); }
+        catch(e){}
+      }
       else out.push(...certsFromDER(der, base));
     });
+    if (!out.length) throw new Error("No parseable certificates in PEM blocks");
     return out;
   }
   if (/^[\sA-Za-z0-9+/=]+$/.test(text) && text.trim().startsWith("MII")){
@@ -1056,6 +1068,11 @@ function parseCMS(bytes){
   let eContent = null;
   if (ek.length > 1){
     const wrap = children(bytes, ek[1])[0];
+    // contentOf assumes a primitive OCTET STRING; a constructed
+    // definite-length encoding (BER) would silently digest segment
+    // headers and misreport "content altered". DER requires primitive
+    // (X.690 10.2), so failing loud is correct.
+    if (wrap.cons) throw new Error("Constructed eContent OCTET STRING not supported");
     eContent = contentOf(bytes, wrap);
   }
   // Absent eContent denotes a detached signature (RFC 5652 5.2);
@@ -1311,7 +1328,7 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
   if (cms.signedAttrsForVerify){
     if (!cms.contentTypeAttr){
       out.steps.push(["bad","signedAttrs missing the content-type attribute (RFC 5652 11.1)"]);
-      return out;
+      return untrustedManifest(out, eContent, "content-type attribute missing");
     }
     if (cms.eContentType && cms.contentTypeAttr !== cms.eContentType){
       out.steps.push(["bad","content-type attribute does not match eContentType - structure altered"]);
@@ -1358,7 +1375,7 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
     // Absent Basic Constraints is treated as cA=FALSE: v3 PKIs are
     // assumed, so a v1 or extension-less issuer fails closed here
     // rather than passing as a legacy root.
-    if (!issuer.isCA){ out.steps.push(["bad","Chain REJECTED: \""+(issuer.subjectCN||"?")+"\" is not a CA certificate (Basic Constraints) and cannot issue certificates"]); return out; }
+    if (!issuer.isCA){ out.steps.push(["bad","Chain REJECTED: \""+(issuer.subjectCN||"?")+"\" is not a CA certificate (Basic Constraints) and cannot issue certificates"]); return untrustedManifest(out, eContent, "chain rejected"); }
     let ok = false;
     try { ok = await verifySig(issuer.spkiBytes, current.sigAlgOID, current.sigAlgParams, current.tbsBytes, current.signature, "SHA-256"); }
     catch(e){ out.steps.push(["warn","Chain: "+e.message]); terminated = true; break; }
@@ -1447,6 +1464,15 @@ function certType(r){
 }
 
 /**
+ * Searchable text for a row: every displayed field, lowercased. Shared
+ * by render (highlighting) and the search handler (selection) so a
+ * match means the same thing in both.
+ */
+function rowHay(r){
+  return (r.name+" "+r.org+" "+r.issuerCN+" "+r.cat+" "+r.ver+" "+r.rel+" "+certType(r)+" "+r.ocsp+" "+r.crl+" "+fmtDate(r.notBefore)+" "+fmtDate(r.notAfter)+" "+r.serial+" "+r.key+" "+r.sigAlg+" "+r.thumb1+" "+r.thumb256).toLowerCase();
+}
+
+/**
  * HTML-escape a string for safe interpolation into innerHTML. Applied
  * to every value that originates from file content or user input.
  */
@@ -1487,8 +1513,7 @@ function render(){
     tb.innerHTML = sorted.map(r=>{
       const expired = r.notAfter < now;
       const notYet = r.notBefore > now;
-      const hay = (r.name+" "+r.org+" "+r.issuerCN+" "+r.cat+" "+r.ver+" "+r.rel+" "+certType(r)+" "+r.ocsp+" "+r.crl+" "+fmtDate(r.notBefore)+" "+fmtDate(r.notAfter)+" "+r.serial+" "+r.key+" "+r.sigAlg+" "+r.thumb1+" "+r.thumb256).toLowerCase();
-      const hit = searchQuery && hay.includes(searchQuery);
+      const hit = searchQuery && rowHay(r).includes(searchQuery);
       if (hit) hits++;
       const trClass = (expired ? "expired" : "") + (hit ? " hit" : "");
       const flag = expired ? '<span class="flag">EXPIRED</span>' : "";
@@ -1641,9 +1666,18 @@ fileInput.addEventListener("change", e=>{ handleFiles([...e.target.files]); file
 drop.addEventListener("drop", e=>handleFiles([...e.dataTransfer.files]));
 
 // Buttons and the search box live inside the Report summary; their
-// clicks must act without collapsing the panel.
+// clicks must act without collapsing the panel. The guard covers
+// buttons only: preventDefault on the search input would also cancel
+// its native clear button (the X is a default action of the click).
+// The input instead re-asserts the panel open after the click, which
+// is a no-op in browsers that already skip the toggle for interactive
+// descendants.
 document.getElementById("reportHead").addEventListener("click", e=>{
-  if (e.target.closest && e.target.closest("button,input")) e.preventDefault();
+  if (e.target.closest && e.target.closest("button")) e.preventDefault();
+  if (e.target.closest && e.target.closest("input")){
+    const d = e.target.closest("details");
+    if (d) requestAnimationFrame(()=>{ d.open = true; });
+  }
 });
 // Space and Enter in the search box would toggle the summary: the
 // toggle is a default action of the key event itself, so stopping
@@ -1679,6 +1713,15 @@ document.getElementById("selAll").addEventListener("change", e=>{
 document.getElementById("search").addEventListener("input", e=>{
   searchQuery = e.target.value.trim().toLowerCase();
   if (!searchQuery) lastFirstHit = null;
+  // Matching rows are also check-selected, so a search doubles as a
+  // selection tool feeding the exports. Selection is replaced on each
+  // query change (checkbox edits after that stand until the query
+  // changes again); clearing the query keeps the last selection, since
+  // an invisible reset would discard the set the search just built.
+  if (searchQuery){
+    selected.clear();
+    for (const r of rows) if (rowHay(r).includes(searchQuery)) selected.add(r.id);
+  }
   render();
   if (searchQuery){
     const first = document.querySelector("tbody tr.hit");
@@ -1700,8 +1743,22 @@ document.querySelectorAll("th.sortable").forEach(th=>{
   th.addEventListener("click", toggle);
   th.addEventListener("keydown", e=>{ if (e.key==="Enter"||e.key===" "){ e.preventDefault(); toggle(); }});
 });
+document.getElementById("bClear").addEventListener("click", e=>{
+  e.preventDefault();
+  e.stopPropagation();
+  for (const id of ["bCat","bVer","bRel"]) document.getElementById(id).value = "";
+  const btn = document.getElementById("bClear");
+  btn.classList.add("done");
+  setTimeout(()=>btn.classList.remove("done"), 1500);
+});
+
 document.getElementById("clear").addEventListener("click", ()=>{
   rows.length = 0; selected.clear(); rowThumbs.clear();
+  // A cleared report starts over; a lingering query would show an
+  // empty-looking table and silently filter the next import.
+  document.getElementById("search").value = "";
+  searchQuery = "";
+  lastFirstHit = null;
   const n = document.getElementById("exportNotice");
   n.style.display = "none"; n.textContent = "";
   errBox.style.display = "none"; errBox.innerHTML = "";
@@ -1940,8 +1997,13 @@ document.getElementById("exportPem").addEventListener("click", async ()=>{
     if (name) exportNotice("Certificate exported: "+name+" - output re-verified");
     return;
   }
+  // Header values come from certificate names: newlines would break
+  // the header format and a five-dash run could open a fake armor
+  // boundary, which the self-check refuses with a message blaming the
+  // tool. Sanitized here; verifyExport stays as the backstop.
+  const hdr = s => String(s).replace(/[\r\n]+/g, " ").replace(/-{5,}/g, "----");
   const parts = certs.map(r =>
-    "subject=CN = "+(r.subjectCN||"")+"\nissuer=CN = "+(r.issuerCN||"")+"\n" +
+    "subject=CN = "+hdr(r.subjectCN||"")+"\nissuer=CN = "+hdr(r.issuerCN||"")+"\n" +
     "-----BEGIN CERTIFICATE-----\n"+b64Wrap(r.raw)+"\n-----END CERTIFICATE-----\n"
   );
   const pemAll = parts.join("\n");
@@ -2167,7 +2229,15 @@ function vRender(){
       const aliased = new Set(vState.aliasMatch.values());
       for (const [mname, entry] of manifest){
         if (aliased.has(mname)) continue;
-        if (![...vState.pending.keys()].some(k=>k.toLowerCase()===mname.toLowerCase()))
+        // A pending file suppresses this row only when it resolves to
+        // this exact entry; a plain lowercase comparison would let one
+        // file hide both of a case-distinct pair (legal on
+        // case-sensitive filesystems, and parseManifest keeps both).
+        const claimed = [...vState.pending.keys()].some(k=>{
+          const hit = manifestEntry(manifest, k);
+          return hit && hit.key === mname;
+        });
+        if (!claimed)
           push(frow(null, entry.display || mname, "st-dim", "Listed in manifest, not provided", entry.hash, ""), null);
       }
       // Group 3: provided files matching nothing.
@@ -2282,6 +2352,9 @@ async function vHandleFilesWork(fileList){
     try { buf = await f.arrayBuffer(); }
     catch(e){ vState.sigNotes.set(f.name, "could not be read; excluded from this drop"); continue; }
     let bytes = new Uint8Array(buf);
+    // Any note for this name is stale once a read succeeds; the
+    // signature branch below sets a fresh one if it applies.
+    vState.sigNotes.delete(f.name);
     if (/\.(sha256|sha384|sha512|p7s|p7m|sig)$/i.test(f.name)){
       let smimePart = null;
       try {
@@ -2297,8 +2370,10 @@ async function vHandleFilesWork(fileList){
             // multipart/signed (openssl smime default): the first part
             // is the signed content, the pkcs7-signature part is the
             // CMS. The content digest covers the part's own MIME
-            // headers (RFC 1847), so the part is kept verbatim as a
-            // detached-content candidate.
+            // headers (RFC 1847). The part is recovered as UTF-8 text,
+            // which is exact for text manifests, the supported case;
+            // binary content parts would need raw byte slicing at the
+            // boundary offsets and are out of scope.
             const parts = text.split(new RegExp("--"+mp[1].replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"(?:--)?\r?\n?")).slice(1);
             const sigPart = parts.find(p=>/content-type:\s*application\/(x-)?pkcs7-signature/i.test(p));
             if (!sigPart) throw new Error("multipart/signed without a pkcs7-signature part");
