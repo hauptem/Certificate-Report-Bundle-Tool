@@ -430,6 +430,11 @@ function children(b, node){
   let p = node.contentStart;
   while (p < node.end){
     const c = readTLV(b, p);
+    // A child that runs past its parent is malformed DER even when it
+    // stays inside the buffer; strict nesting keeps the decoder's
+    // fail-loud convention instead of silently reading a sibling's
+    // bytes.
+    if (c.end > node.end) throw new Error("Child overruns parent");
     out.push(c);
     p = c.end;
   }
@@ -502,7 +507,14 @@ function decodeTime(b, node){
   } else {          // GeneralizedTime YYYYMMDDHHMMSSZ
     Y=+s.slice(0,4); M=+s.slice(4,6); D=+s.slice(6,8); h=+s.slice(8,10)||0; m=+s.slice(10,12)||0; sec=+s.slice(12,14)||0;
   }
-  return new Date(Date.UTC(Y, M-1, D, h, m, sec));
+  // RFC 5280 4.1.2.5 mandates Z, but a nonconforming +-HHMM offset is
+  // honored rather than silently read as UTC, which would display a
+  // shifted validity with no indication. Throwing here would reject an
+  // otherwise-usable certificate over a display field.
+  let offMin = 0;
+  const off = s.match(/([+-])(\d{2})(\d{2})$/);
+  if (off) offMin = (off[1] === "-" ? -1 : 1) * (+off[2]*60 + +off[3]);
+  return new Date(Date.UTC(Y, M-1, D, h, m, sec) - offMin*60000);
 }
 
 /**
@@ -656,7 +668,9 @@ function parseCertificate(bytes){
     org:       subject[OID_O]  || issuer[OID_O] || "",
     subjectCN: subject[OID_CN] || "",
     notBefore, notAfter, selfSigned, isCA, keyUsageBits, ocsp, crl,
-    raw: bytes,
+    // Bounded to the certificate's own TLV: callers pass exact slices,
+    // and this guarantees raw can never include padding they did not.
+    raw: bytesOf(bytes, root),
     tbsBytes: bytesOf(bytes, tbs),
     spkiBytes: bytesOf(bytes, spkiNode),
     issuerBytes: bytesOf(bytes, issuerNode),
@@ -735,12 +749,15 @@ function b64ToBytes(s){
 
 /**
  * Expand a DER buffer into one or more certificates.
- * A plain certificate yields itself. A PKCS#7/CMS SignedData
- * (RFC 5652 5.1) yields each member of its certificates [0] set,
- * labeled "filename [n]"; labels serve only as fallback row names for
- * certificates without a subject CN.
- * @throws {Error} If the buffer is not a SEQUENCE, or is a PKCS#7
- *         structure with no certificate set.
+ * A PKCS#7/CMS SignedData (RFC 5652 5.1) yields each parseable member
+ * of its certificates [0] set. Otherwise the buffer is read as bare
+ * certificates in sequence: each is sliced to its own TLV extent, so
+ * transfer-appended whitespace never enters raw, and concatenated
+ * certificates all import. Labels ("filename [n]") serve only as
+ * fallback row names for certificates without a subject CN.
+ * @throws {Error} If the buffer is not a SEQUENCE, a PKCS#7 structure
+ *         has no parseable certificates, or non-whitespace data trails
+ *         the last certificate.
  */
 function certsFromDER(bytes, filename){
   const root = readTLV(bytes, 0);
@@ -766,20 +783,47 @@ function certsFromDER(bytes, filename){
     if (!out.length) throw new Error("PKCS#7: no parseable certificates in bundle");
     return out;
   }
-  return [{ bytes, label: filename }];
+  // Bare certificate path. The certificate's extent is its outer TLV,
+  // not the file: a transfer-appended newline or a concatenation of
+  // DER certificates would otherwise become part of raw, corrupting
+  // thumbprints (the out-of-band trust surface), dedup, and every
+  // export. Whitespace between and after certificates is skipped;
+  // any other trailing data fails loudly.
+  const out = [];
+  let p = 0, n = 1;
+  while (p < bytes.length){
+    if (bytes[p] === 0x0A || bytes[p] === 0x0D || bytes[p] === 0x20 || bytes[p] === 0x09){ p++; continue; }
+    let node = null;
+    try { node = readTLV(bytes, p); } catch(e){ if (!out.length) throw e; }
+    if (!node || node.tag !== 16) throw new Error("Trailing data after certificate");
+    out.push({ bytes: bytes.subarray(node.start, node.end), label: out.length ? filename+" ["+n+"]" : filename });
+    n++;
+    p = node.end;
+  }
+  return out;
 }
 
 /**
  * Route an input file to the correct decoder by content, not extension:
- * leading 0x30 => DER; "-----BEGIN ..." blocks => PEM (CERTIFICATE
- * blocks decode directly, PKCS7 blocks expand); Base64 text starting
- * with "MII" => headerless DER.
+ * leading 0x30 => DER attempted first (0x30 is also ASCII "0", so a
+ * failed DER parse falls through to the text paths); "-----BEGIN ..."
+ * blocks => PEM (CERTIFICATE blocks decode directly, PKCS7 blocks
+ * expand); Base64 text starting with "MII" => headerless DER.
  * @returns {Array<{bytes:Uint8Array, label:string}>} Labels serve as
  *          fallback row names for certificates without a subject CN.
  */
 function extractCertBuffers(buf, filename){
   const bytes = new Uint8Array(buf);
-  if (bytes[0] === 0x30) return certsFromDER(bytes, filename);
+  // 0x30 is both the DER SEQUENCE tag and ASCII "0", so a text file
+  // beginning with a zero sniffs as DER. The DER attempt is
+  // authoritative when it parses; on failure the text paths get their
+  // turn, and the DER error is rethrown only if they find nothing,
+  // since it is the better diagnostic for a genuinely binary file.
+  let derError = null;
+  if (bytes[0] === 0x30){
+    try { return certsFromDER(bytes, filename); }
+    catch(e){ derError = e; }
+  }
   let text = "";
   try { text = new TextDecoder("utf-8",{fatal:false}).decode(bytes); } catch(e){}
   const blocks = [...text.matchAll(/-----BEGIN (CERTIFICATE|PKCS7|PKCS #7 SIGNED DATA)-----([\s\S]*?)-----END \1-----/g)];
@@ -797,7 +841,7 @@ function extractCertBuffers(buf, filename){
   if (/^[\sA-Za-z0-9+/=]+$/.test(text) && text.trim().startsWith("MII")){
     return certsFromDER(b64ToBytes(text), filename);
   }
-  throw new Error("Unrecognized format (not DER, PKCS#7, PEM, or base64)");
+  throw derError || new Error("Unrecognized format (not DER, PKCS#7, PEM, or base64)");
 }
 
 /**
@@ -1560,7 +1604,13 @@ function importNotices(errs, dupes){
  * failures and the skipped-duplicate count are collected and displayed
  * without aborting the batch.
  */
-async function handleFiles(fileList){
+let importQueue = Promise.resolve();
+function handleFiles(fileList){
+  const run = importQueue.then(()=>handleFilesWork(fileList));
+  importQueue = run.catch(()=>{});
+  return run;
+}
+async function handleFilesWork(fileList){
   errBox.style.display = "none"; errBox.innerHTML = "";
   const errs = [];
   let dupes = 0;
@@ -1983,9 +2033,12 @@ document.getElementById("exportP7b").addEventListener("click", async ()=>{
                          S/MIME signature, tried first as detached
                          content (RFC 1847 digests cover the part as
                          transmitted).
+   vState.scanCache    - stage-2 digests per file and algorithm for
+                         files matching no manifest entry, so they are
+                         not re-hashed on every drop.
    vState.lastResult   - verifyCMS output for the current state.
    ====================================================================== */
-const vState = { cms: null, cmsName: "", pool: [], pending: new Map(), fileHashes: new Map(), aliasMatch: new Map(), importable: new Set(), lastResult: null, sigNotes: new Map(), smimeContent: null, fileCerts: new Map() };
+const vState = { cms: null, cmsName: "", pool: [], pending: new Map(), fileHashes: new Map(), aliasMatch: new Map(), importable: new Set(), lastResult: null, sigNotes: new Map(), smimeContent: null, fileCerts: new Map(), scanCache: new Map() };
 const vResults = document.getElementById("vresults");
 
 /**
@@ -1997,9 +2050,13 @@ const vResults = document.getElementById("vresults");
  * manifest entries not provided, and provided files outside the
  * manifest (skipped, never hashed). Certificate-bearing files sort
  * before non-certificate files. A detached signature's matched content
- * file is labeled rather than reported as skipped. Files containing
- * certificates carry an Import button; an Import-all button precedes
- * the table when more than one is present.
+ * file is labeled rather than reported as skipped. Matching rows carry
+ * a tiered verdict: green only under a trusted manifest with a chain
+ * that reached a root; amber when the chain is unverified or the
+ * manifest is untrusted, with the reason in the status text. Files
+ * containing certificates carry an Import button; an Import-all
+ * button, offered when more than one file is eligible, uses
+ * vImportEligible so the bulk path honors the same verdicts.
  */
 function vRender(){
   const parts = [];
@@ -2166,8 +2223,13 @@ async function vRun(){
     const algs = [...new Set([...manifest.values()].map(e=>e.alg))];
     for (const [name, bytes] of vState.pending){
       if (manifestEntry(manifest, name)) continue;
-      const digests = {};
-      for (const alg of algs) digests[alg] = await digestHex(alg, bytes);
+      // Cached per name and algorithm: a large file matching nothing
+      // was otherwise re-digested on every subsequent drop. The cache
+      // is dropped with the file's re-drop and with a replaced
+      // signature (a new manifest may change the algorithm set).
+      const digests = vState.scanCache.get(name) || {};
+      for (const alg of algs) if (!digests[alg]) digests[alg] = await digestHex(alg, bytes);
+      vState.scanCache.set(name, digests);
       for (const [mkey, entry] of manifest){
         // An entry is satisfied by name only when its named file's
         // hash matched; a mismatched named file leaves the entry open
@@ -2200,7 +2262,18 @@ async function vRun(){
  * chain-building pool, and such files are marked importable so the
  * results table can offer them to the report.
  */
-async function vHandleFiles(fileList){
+/* Intake serialization: each zone's drops run one at a time. The
+   handlers await digests mid-iteration, so a second drop landing
+   before the first finishes would mutate pending and the hash caches
+   under the running comparison; queueing removes the interleaving
+   while keeping the handlers awaitable. */
+let vIntakeQueue = Promise.resolve();
+function vHandleFiles(fileList){
+  const run = vIntakeQueue.then(()=>vHandleFilesWork(fileList));
+  vIntakeQueue = run.catch(()=>{});
+  return run;
+}
+async function vHandleFilesWork(fileList){
   for (const f of fileList){
     // Read inside a guard: a file moved or modified between selection
     // and read rejects here, and one bad read must not drop the rest
@@ -2248,6 +2321,7 @@ async function vHandleFiles(fileList){
         vState.cmsName = f.name;
         vState.smimeContent = smimePart;
         vState.fileHashes.clear();
+        vState.scanCache.clear();
         // A prior drop of this name may have fallen through to pending
         // as content (see the catch below); now that the name parses as
         // a signature, that content-era state would ghost a Skipped row
@@ -2273,6 +2347,7 @@ async function vHandleFiles(fileList){
     // content that no longer parses must not leave the old content's
     // certificates in the chain pool or an Import button on the row.
     vState.fileHashes.delete(f.name);
+    vState.scanCache.delete(f.name);
     vState.pending.set(f.name, new Uint8Array(buf));
     vState.fileCerts.delete(f.name);
     vState.importable.delete(f.name);
@@ -2323,16 +2398,30 @@ function vImportEligible(){
   const untrusted = vState.lastResult && vState.lastResult.untrustedReason;
   return [...vState.importable].filter(name=>{
     if (!manifest) return true;
-    const hit = manifestEntry(manifest, name);
-    if (!hit) return true; // not covered by the manifest: user's call
-    // A match against an untrusted manifest proves nothing; only a
-    // match under a verified signature qualifies for the bulk path.
+    // Name-matched and content-matched (renamed) files are the same
+    // case: covered by the manifest. A match against an untrusted
+    // manifest proves nothing, so neither qualifies for the bulk path;
+    // only files the manifest never covered remain the user's call.
+    const covered = manifestEntry(manifest, name) || vState.aliasMatch.has(name);
+    if (!covered) return true;
     if (untrusted) return false;
+    const hit = manifestEntry(manifest, name);
+    if (!hit) return true; // covered via aliasMatch: content matched
     return vState.fileHashes.get(name) === hit.entry.hash;
   });
 }
 
-async function vImportFiles(names){
+/**
+ * Import certificate files already held in the verification panel into
+ * the report, without a second drop. Shares the report import queue
+ * because both paths write rows.
+ */
+function vImportFiles(names){
+  const run = importQueue.then(()=>vImportFilesWork(names));
+  importQueue = run.catch(()=>{});
+  return run;
+}
+async function vImportFilesWork(names){
   const errs = [];
   let added = 0, dupes = 0;
 
@@ -2378,6 +2467,7 @@ vclear.addEventListener("click", e=>{
   vState.sigNotes.clear();
   vState.smimeContent = null;
   vState.fileCerts.clear();
+  vState.scanCache.clear();
   vState.importable.clear();
   vState.lastResult = null;
   vRender();
@@ -2401,10 +2491,11 @@ render();
    sets match. Each side dedupes by content hash, so overlapping input
    files are harmless. Subject matching uses the full subject DER, not
    the CN, to avoid cross-organization name collisions. Parse failures
-   persist in cmpState.errs until the next drop or a clear, so a
-   Show-all toggle doesn't silently discard them.
+   persist per side in cmpState.errs; a side's next drop replaces its
+   own, clearing a side clears only its own, and a Show-all toggle
+   discards neither.
    ====================================================================== */
-const cmpState = { ref: new Map(), comp: new Map(), showAll: false, errs: [] };
+const cmpState = { ref: new Map(), comp: new Map(), showAll: false, errs: { ref: [], comp: [] } };
 
 /**
  * Intake for one comparison side: expand every dropped file to
@@ -2412,11 +2503,17 @@ const cmpState = { ref: new Map(), comp: new Map(), showAll: false, errs: [] };
  * of the certificate bytes. Parse failures are reported per file in
  * the results area without discarding the rest.
  */
-async function cmpHandleFiles(side, fileList){
-  // Errors persist in cmpState so a Show-all toggle or a clear of the
-  // other side does not silently drop them; the next drop replaces
-  // them, and clearing a side clears its errors with it.
-  cmpState.errs = [];
+let cmpQueue = Promise.resolve();
+function cmpHandleFiles(side, fileList){
+  const run = cmpQueue.then(()=>cmpHandleFilesWork(side, fileList));
+  cmpQueue = run.catch(()=>{});
+  return run;
+}
+async function cmpHandleFilesWork(side, fileList){
+  // Errors persist per side so a Show-all toggle or a clear of the
+  // other side does not drop them; a side's next drop replaces its
+  // own, and clearing a side clears only its own.
+  cmpState.errs[side] = [];
   for (const f of fileList){
     // Read inside the try so a rejected read lands in errs like any
     // parse failure instead of aborting the batch.
@@ -2428,7 +2525,7 @@ async function cmpHandleFiles(side, fileList){
         if (!cmpState[side].has(key))
           cmpState[side].set(key, { c, thumb1: await digestHex("SHA-1", c.raw) });
       }
-    } catch(e){ cmpState.errs.push(f.name+": "+e.message); }
+    } catch(e){ cmpState.errs[side].push(f.name+": "+e.message); }
   }
   cmpRender();
 }
@@ -2442,7 +2539,7 @@ async function cmpHandleFiles(side, fileList){
  * when both sides hold at least one certificate.
  */
 function cmpRender(){
-  const errs = cmpState.errs;
+  const errs = [...cmpState.errs.ref, ...cmpState.errs.comp];
   const box = document.getElementById("cmpResults");
   document.getElementById("cmpCountRef").textContent  = cmpState.ref.size  ? cmpState.ref.size+" certificate(s)"  : "empty";
   document.getElementById("cmpCountComp").textContent = cmpState.comp.size ? cmpState.comp.size+" certificate(s)" : "empty";
@@ -2573,7 +2670,8 @@ document.getElementById("cmpToggle").addEventListener("click", ()=>{
 document.getElementById("cmpClearBoth").addEventListener("click", ()=>{
   cmpState.ref.clear();
   cmpState.comp.clear();
-  cmpState.errs = [];
+  cmpState.errs.ref = [];
+  cmpState.errs.comp = [];
   cmpRender();
 });
 document.getElementById("cmpClose").addEventListener("click", ()=>{
@@ -2596,7 +2694,7 @@ for (const [side, zoneId, fileId, clearId] of [["ref","cmpZoneRef","cmpFileRef",
     cmpHandleFiles(side, [...e.dataTransfer.files]);
   });
   input.addEventListener("change", e=>{ cmpHandleFiles(side, [...e.target.files]); input.value=""; });
-  document.getElementById(clearId).addEventListener("click", ()=>{ cmpState[side].clear(); cmpState.errs = []; cmpRender(); });
+  document.getElementById(clearId).addEventListener("click", ()=>{ cmpState[side].clear(); cmpState.errs[side] = []; cmpRender(); });
 }
 
 /* PEM view dialog: click a certificate name in the report to see that
