@@ -755,9 +755,15 @@ function certsFromDER(bytes, filename){
     const out = [];
     let n = 1;
     for (const c of children(bytes, certSet)){
-      out.push({ bytes: bytesOf(bytes, c), label: filename+" ["+(n++)+"]" });
+      // CertificateChoices admits non-certificate members (attribute
+      // certificates, other tagged forms, RFC 5652 10.2.2); each entry
+      // is validated individually so one exotic member cannot fail the
+      // whole bundle. Import counts reveal any skips.
+      const entry = bytesOf(bytes, c);
+      try { parseCertificate(entry); } catch(e){ n++; continue; }
+      out.push({ bytes: entry, label: filename+" ["+(n++)+"]" });
     }
-    if (!out.length) throw new Error("PKCS#7: certificate set is empty");
+    if (!out.length) throw new Error("PKCS#7: no parseable certificates in bundle");
     return out;
   }
   return [{ bytes, label: filename }];
@@ -1010,7 +1016,12 @@ function parseCMS(bytes){
   }
   // Absent eContent denotes a detached signature (RFC 5652 5.2);
   // the caller resolves the external content.
-  const certs = certsNode ? children(bytes, certsNode).map(c=>parseCertificate(bytesOf(bytes, c))) : [];
+  // Same per-entry tolerance as certsFromDER: a non-certificate
+  // CertificateChoices member is skipped, not fatal to verification.
+  const certs = [];
+  if (certsNode) for (const c of children(bytes, certsNode)){
+    try { certs.push(parseCertificate(bytesOf(bytes, c))); } catch(e){}
+  }
   if (!signerInfos) throw new Error("CMS has no signerInfos");
   const si = children(bytes, signerInfos)[0];
   const sik = children(bytes, si);
@@ -1394,8 +1405,9 @@ function render(){
     let va, vb;
     if (sortKey === "exp"){ va = a.notAfter?.getTime()||0; vb = b.notAfter?.getTime()||0; }
     else {
-      // Same collation as uniqueCerts, so screen order matches export
-      // order for non-ASCII names.
+      // Same collation as uniqueCerts for consistent name ordering;
+      // exports always write name-ascending regardless of the active
+      // sort column or direction.
       return a.name.toLowerCase().localeCompare(b.name.toLowerCase()) * sortDir;
     }
     return va < vb ? -sortDir : va > vb ? sortDir : 0;
@@ -1420,7 +1432,7 @@ function render(){
       return '<tr class="'+trClass+'">' +
         '<td class="selcol"><input type="checkbox" class="sel" data-id="'+r.id+'"'+(selected.has(r.id)?' checked':'')+' aria-label="Select row"></td>' +
         '<td>'+(r.cat ? '<span class="'+chipClass(r.cat)+'">'+esc(r.cat)+'</span>' : '')+'</td>' +
-        '<td class="certname" data-id="'+r.id+'" title="Show PEM">'+esc(r.name)+'</td>' +
+        '<td class="certname" data-id="'+r.id+'" title="Show PEM" tabindex="0">'+esc(r.name)+'</td>' +
         '<td>'+esc(r.ver)+'</td>' +
         '<td>'+esc(r.rel)+'</td>' +
         '<td>'+esc(r.org)+'</td>' +
@@ -1459,6 +1471,9 @@ function render(){
 /* Events */
 
 let nextId = 1;
+// SHA-256 thumbprints of every current row; the dedup authority for
+// imports, maintained at every insertion, removal, and clear.
+const rowThumbs = new Set();
 const errBox = document.getElementById("errors");
 
 /* ======================================================================
@@ -1473,12 +1488,12 @@ const errBox = document.getElementById("errors");
  * category or version is blank, values derived from the bundle filename
  * are used instead. Every row is named by its certificate's subject CN,
  * falling back to the source filename only when the certificate has no
- * CN. Byte-identical certificates already present are skipped: "have"
- * carries their SHA-256 set across a multi-buffer batch, so importing
- * the same bundle in multiple encodings does not double rows.
+ * CN. Byte-identical certificates already present are skipped, checked
+ * against the live rowThumbs set at insertion, so the same bundle in
+ * multiple encodings, or two overlapping drops, cannot double rows.
  * @returns {{added:number, dupes:number}}
  */
-async function importBuffer(buf, filename, have){
+async function importBuffer(buf, filename){
   const cat = document.getElementById("bCat").value.trim();
   const ver = document.getElementById("bVer").value.trim();
   const rel = document.getElementById("bRel").value.trim();
@@ -1489,8 +1504,12 @@ async function importBuffer(buf, filename, have){
   for (const item of extractCertBuffers(buf, filename)){
     const c = parseCertificate(item.bytes);
     const thumb256 = await digestHex("SHA-256", c.raw);
-    if (have.has(thumb256)){ dupes++; continue; }
-    have.add(thumb256);
+    // Checked against live report state at insertion, not a snapshot
+    // taken at batch start: two overlapping drops (or a drop racing an
+    // Import click) each awaited digests, and a snapshot from before
+    // the other's insertions produced duplicate rows.
+    if (rowThumbs.has(thumb256)){ dupes++; continue; }
+    rowThumbs.add(thumb256);
     const name = c.subjectCN || item.label;
     rows.push({ id: nextId++, name, cat: useCat, ver: useVer, rel,
                 org: c.org, issuerCN: c.issuerCN,
@@ -1525,11 +1544,10 @@ async function handleFiles(fileList){
   errBox.style.display = "none"; errBox.innerHTML = "";
   const errs = [];
   let dupes = 0;
-  const have = new Set(rows.map(r=>r.thumb256));
   for (const f of fileList){
     try {
       const buf = await f.arrayBuffer();
-      dupes += (await importBuffer(buf, f.name, have)).dupes;
+      dupes += (await importBuffer(buf, f.name)).dupes;
     } catch(e){
       errs.push(f.name + " - " + e.message);
     }
@@ -1573,7 +1591,7 @@ document.getElementById("tbody").addEventListener("click", e=>{
   if (e.target.classList.contains("del")){
     const id = +e.target.dataset.id;
     const idx = rows.findIndex(x=>x.id===id);
-    if (idx >= 0){ rows.splice(idx,1); selected.delete(id); render(); }
+    if (idx >= 0){ rowThumbs.delete(rows[idx].thumb256); rows.splice(idx,1); selected.delete(id); render(); }
   }
 });
 document.getElementById("tbody").addEventListener("change", e=>{
@@ -1613,7 +1631,7 @@ document.querySelectorAll("th.sortable").forEach(th=>{
   th.addEventListener("keydown", e=>{ if (e.key==="Enter"||e.key===" "){ e.preventDefault(); toggle(); }});
 });
 document.getElementById("clear").addEventListener("click", ()=>{
-  rows.length = 0; selected.clear();
+  rows.length = 0; selected.clear(); rowThumbs.clear();
   const n = document.getElementById("exportNotice");
   n.style.display = "none"; n.textContent = "";
   errBox.style.display = "none"; errBox.innerHTML = "";
@@ -1708,7 +1726,7 @@ document.getElementById("exportHtml").addEventListener("click", async ()=>{
     '@media print{.head{background:#fff;color:#111417;padding:0 0 12px}.head .meta{color:#5c6572}}\n' +
     '</style></head><body>\n' +
     '<div class="head"><h1>CERTIFICATE REPORT</h1>\n' +
-    '<div class="meta">Generated '+fmtDate(now)+' \u00B7 '+uc.certs.length+' certificate(s)'+(uc.selectedOnly?' (selected only)':'')+'</div></div>\n' +
+    '<div class="meta">Generated '+fmtDateLocal(now)+' \u00B7 '+uc.certs.length+' certificate(s)'+(uc.selectedOnly?' (selected only)':'')+'</div></div>\n' +
     '<div class="tablewrap"><table><thead><tr>' +
     '<th>Category</th><th>Certificate Name</th><th>Version</th><th>Release</th><th>Organization</th>' +
     '<th>Issuer Common Name</th><th>Not Before</th><th>Expiration</th><th>Serial</th><th>Key</th>' +
@@ -1818,6 +1836,14 @@ function verifyExport(data, expected){
 /** Refusal notice shared by the certificate-emitting exports. */
 function exportRefused(kind){
   exportNotice("Export REFUSED: "+kind+" self-check failed - the built output did not read back identical to the report. Nothing was written.");
+}
+
+/** Local-time M/D/YYYY, for the report's Generated line. Certificate
+    validity dates render in UTC (fmtDate) because that is what the
+    certificate asserts; a generation timestamp is an event on the
+    user's clock. */
+function fmtDateLocal(d){
+  return (d.getMonth()+1)+"/"+d.getDate()+"/"+d.getFullYear();
 }
 
 /** YYYYMMDD stamp for export filenames. */
@@ -1998,8 +2024,9 @@ function vRender(){
   const manifest = vState.lastResult && vState.lastResult.ok ? vState.lastResult.manifest : null;
   if (vState.pending.size){
     parts.push('<div class="vfiles">');
-    if (vState.importable.size > 1)
-      parts.push('<div class="vline"><button class="vimp" data-all="1" title="Add every certificate file below to the report">Import all certificate files ('+vState.importable.size+')</button></div>');
+    const eligible = vImportEligible();
+    if (eligible.length > 1)
+      parts.push('<div class="vline"><button class="vimp" data-all="1" title="Add every certificate file below to the report">Import all certificate files ('+eligible.length+')</button></div>');
     /* One row per file, in the same table format as the report:
        Import | File Name | Status | Manifest Hash | Computed Hash.
        stText is trusted markup; callers escape any file-derived
@@ -2254,15 +2281,31 @@ vdrop.addEventListener("drop", e=>vHandleFiles([...e.dataTransfer.files]));
  * fields, filename-derived metadata, and duplicate skipping as the
  * import drop zone.
  */
+/**
+ * Files eligible for Import-all: certificate-bearing files excluding
+ * any whose manifest hash comparison failed. The per-row buttons apply
+ * the same rule (a mismatch row renders without one), so the one-click
+ * path can never import content the manifest just rejected.
+ */
+function vImportEligible(){
+  const manifest = vState.lastResult && vState.lastResult.ok ? vState.lastResult.manifest : null;
+  return [...vState.importable].filter(name=>{
+    if (!manifest) return true;
+    const hit = manifestEntry(manifest, name);
+    if (!hit) return true; // not covered by the manifest: user's call
+    return vState.fileHashes.get(name) === hit.entry.hash;
+  });
+}
+
 async function vImportFiles(names){
   const errs = [];
   let added = 0, dupes = 0;
-  const have = new Set(rows.map(r=>r.thumb256));
+
   for (const name of names){
     const bytes = vState.pending.get(name);
     if (!bytes) continue;
     try {
-      const r = await importBuffer(bytes, name, have);
+      const r = await importBuffer(bytes, name);
       added += r.added; dupes += r.dupes;
     } catch(e){ errs.push(name + " - " + e.message); }
   }
@@ -2277,7 +2320,7 @@ vResults.addEventListener("click", async e=>{
   if (!btn || btn.disabled) return;
   // data-all marks the import-all button; a filename sentinel would
   // collide with a file literally named "*", legal on POSIX.
-  const names = btn.dataset.all ? [...vState.importable] : [btn.dataset.name];
+  const names = btn.dataset.all ? vImportEligible() : [btn.dataset.name];
   btn.disabled = true;
   await vImportFiles(names);
   // Feedback is a brief color change only; the label never changes, so
@@ -2532,14 +2575,21 @@ const pemDlg = document.getElementById("pemview");
 function certToPem(r){
   return "-----BEGIN CERTIFICATE-----\n"+b64Wrap(r.raw)+"\n-----END CERTIFICATE-----";
 }
-document.getElementById("tbody").addEventListener("click", e=>{
-  const cell = e.target.closest ? e.target.closest("td.certname") : null;
-  if (!cell) return;
+function pemOpenFromCell(cell){
   const r = rows.find(x=>x.id === +cell.dataset.id);
   if (!r) return;
   document.getElementById("pemTitle").textContent = r.name;
   document.getElementById("pemBody").value = certToPem(r);
   if (pemDlg.showModal) pemDlg.showModal(); else pemDlg.setAttribute("open","");
+}
+document.getElementById("tbody").addEventListener("click", e=>{
+  const cell = e.target.closest ? e.target.closest("td.certname") : null;
+  if (cell) pemOpenFromCell(cell);
+});
+document.getElementById("tbody").addEventListener("keydown", e=>{
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const cell = e.target.closest ? e.target.closest("td.certname") : null;
+  if (cell){ e.preventDefault(); pemOpenFromCell(cell); }
 });
 document.getElementById("pemCopy").addEventListener("click", async ()=>{
   const btn = document.getElementById("pemCopy");
