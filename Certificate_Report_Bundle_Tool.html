@@ -1106,7 +1106,12 @@ async function verifyCMS(cms, pool, pending){
   // direct signature verification otherwise.
   let eContent = cms.eContent;
   if (!eContent){
-    if (!pending || !pending.size){
+    // The multipart/signed content part, when present, is the primary
+    // candidate; user-dropped files follow.
+    const sources = vState.smimeContent
+      ? [["(S/MIME signed content)", vState.smimeContent], ...(pending || [])]
+      : [...(pending || [])];
+    if (!sources.length){
       out.steps.push(["bad","Detached signature: drop the signed content file (the hash manifest) alongside the signature file"]);
       return out;
     }
@@ -1127,11 +1132,6 @@ async function verifyCMS(cms, pool, pending){
       }
       return out;
     }
-    // The multipart/signed content part, when present, is the primary
-    // candidate; user-dropped files follow.
-    const sources = vState.smimeContent
-      ? [["(S/MIME signed content)", vState.smimeContent], ...pending]
-      : [...pending];
     outer:
     for (const [name, bytes] of sources){
       // Binary DER files (leading 0x30) are never S/MIME text; skip
