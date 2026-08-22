@@ -350,7 +350,7 @@
       <li>The chain is incomplete: drop the missing issuer certificate. Certificates from every dropped file are used for chain building</li>
       <li>A file shows as skipped: nothing in the manifest matches it by name or content. This is normal for chain files and documentation</li>
       <li>Folder drag-and-drop doesn't work when the page is opened from disk: select the files inside the folder instead</li>
-      <li>Fewer rows appear than expected: check the notices above the Import drop zone; whole-file failures, duplicates, and unparseable entries skipped inside otherwise-valid files are all reported there</li>
+      <li>Fewer rows appear than expected: check the notices below the Import drop zone; whole-file failures, duplicates, and unparseable entries skipped inside otherwise-valid files are all reported there</li>
       <li>"Indefinite length not allowed in DER": the signature is BER-encoded (some mail clients emit this); re-encode it to DER with openssl cms before verifying</li>
     </ul>
   </div>
@@ -679,7 +679,14 @@ function parseCertificate(bytes){
           // duplicate from blanking the field.
           const seq = readTLV(inner, 0);
           const uris = [];
-          collectURIs(inner, seq, uris);
+          // Scoped to each DistributionPoint's [0] distributionPoint:
+          // a whole-value walk would also collect cRLIssuer [2] URIs
+          // (RFC 5280 4.2.1.13) and could display the issuer's URI as
+          // the CRL URL.
+          for (const dp of children(inner, seq)){
+            const dpn = children(inner, dp).find(k=>k.cls===2 && k.tag===0);
+            if (dpn) collectURIs(inner, dpn, uris);
+          }
           const http = uris.filter(u=>/^https?:|^ldap:/i.test(u));
           crl = (http.find(u=>/^http/i.test(u)) || http[0] || uris[0] || "");
         } else if (oid === OID_AIA){
@@ -2511,7 +2518,7 @@ function vRender(){
 async function vRun(){
   if (vState.cms){
     try { vState.lastResult = await verifyCMS(vState.cms, vState.pool, vState.pending, vState.cmsName, vState.smimeContent); }
-    catch(e){ vState.lastResult = { steps: [["bad","Verification failed: "+e.message]], manifest: null, ok: false }; }
+    catch(e){ vState.lastResult = { steps: [["bad","Verification failed: "+e.message]], manifest: null, ok: false, contentName: null, chainComplete: false }; }
   }
   vState.aliasMatch.clear();
   const manifest = vState.lastResult ? vState.lastResult.manifest : null;
@@ -2980,7 +2987,7 @@ function cmpRender(){
   for (const [refs, comps] of changed){
     const diff = diffFields(refs, comps);
     for (const e of comps) trs.push(row("CHANGED IN COMPARISON BUNDLE","st-changed",e,"row-amber",diff));
-    for (const e of refs)  trs.push(row("REFERENCE","st-ref",e,""));
+    for (const e of refs)  trs.push(row("REFERENCE","st-ref",e,"",diff));
   }
   for (const e of extra) trs.push(row("MISSING IN REFERENCE BUNDLE","st-extra",e,"row-amber"));
   if (cmpState.showAll){

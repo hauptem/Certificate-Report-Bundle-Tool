@@ -1,6 +1,6 @@
 # Certificate Report/Bundle Tool - User Guide
 
-Open `Certificate_Report_Bundle_Tool.html` in a modern browser.
+Open `Certificate Report Bundle Tool.html` in a modern browser.
 
 The tool has three sections: Verify checks a signed release, Import reads certificates into the report, and Report displays and exports them.
 
@@ -45,5 +45,5 @@ Exports cover the checked rows, or the whole report if nothing is checked, with 
 - The chain is incomplete: drop the missing issuer certificate. Certificates from every dropped file are used for chain building
 - A file shows as skipped: nothing in the manifest matches it by name or content. This is normal for chain files and documentation
 - Folder drag-and-drop doesn't work when the page is opened from disk: select the files inside the folder instead
-- Fewer rows appear than expected: check the notices above the Import drop zone; whole-file failures, duplicates, and unparseable entries skipped inside otherwise-valid files are all reported there
+- Fewer rows appear than expected: check the notices below the Import drop zone; whole-file failures, duplicates, and unparseable entries skipped inside otherwise-valid files are all reported there
 - "Indefinite length not allowed in DER": the signature is BER-encoded (some mail clients emit this); re-encode it to DER with openssl cms before verifying
