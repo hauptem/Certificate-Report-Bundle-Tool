@@ -328,7 +328,7 @@
     <p>Fill in Category, Version, or Release Date before dropping to label everything in that drop. Filenames like <code>certificates_pkcs7_v2_1_internal</code> fill Category and Version automatically when you leave them blank.</p>
 
     <h2>Report</h2>
-    <p>Each certificate is a row showing its subject, issuer, validity, serial, algorithms, thumbprint, revocation URLs, and type, with expired and not-yet-valid certificates flagged. Sort by clicking the Certificate Name or Expiration header, and use the search box to highlight matches anywhere in the table; matching rows are also selected, so a search can feed an export directly. Check rows to select them for export, or remove them individually with the button at the end of each row. Click a certificate's name to view its PEM in a popup with a Copy button, for pasting into anything that accepts PEM directly.</p>
+    <p>Each certificate is a row showing its subject, issuer, validity, serial, algorithms, thumbprint, revocation URLs, and type, with expired and not-yet-valid certificates flagged. Sort by clicking the Certificate Name or Expiration header, and use the search box to highlight matches anywhere in the table; matching rows are also selected, so a search can feed an export directly; clearing the search clears the selection. Check rows to select them for export, or remove them individually with the button at the end of each row. Click a certificate's name to view its PEM in a popup with a Copy button, for pasting into anything that accepts PEM directly.</p>
 
     <h2>Compare</h2>
     <p>Compare, in the title bar, diffs two certificate sets. Drop the baseline on the Reference side and the set you're evaluating on the Comparison side; differences appear as a table once both sides have certificates. Matching uses the full subject, so same-named certificates from different organizations aren't confused.</p>
@@ -590,6 +590,10 @@ function parseCertificate(bytes){
   const rootKids = children(bytes, root);
   const tbs = rootKids[0];
   if (!tbs || tbs.tag !== 16) throw new Error("Missing tbsCertificate");
+  // Certificate ::= SEQUENCE of exactly three children; guarded so a
+  // re-wrapped or cut structure reads as what it is instead of a
+  // property access on undefined in the outer-signature reads below.
+  if (rootKids.length < 3) throw new Error("Certificate structure is truncated");
   const t = children(bytes, tbs);
   let i = 0;
   if (t[i] && t[i].cls === 2 && t[i].tag === 0) i++;   // [0] EXPLICIT version, optional
@@ -611,6 +615,7 @@ function parseCertificate(bytes){
   }
 
   const vKids = children(bytes, validity);
+  if (vKids.length < 2) throw new Error("Truncated validity");
   const notBefore = decodeTime(bytes, vKids[0]);
   const notAfter = decodeTime(bytes, vKids[1]);
 
@@ -780,6 +785,7 @@ function certsFromDER(bytes, filename){
     const explicit0 = kids.find(k=>k.cls===2 && k.tag===0);
     if (!explicit0) throw new Error("PKCS#7: missing SignedData content");
     const sd = children(bytes, explicit0)[0];
+    if (!sd) throw new Error("PKCS#7: empty SignedData content");
     const certSet = children(bytes, sd).find(k=>k.cls===2 && k.tag===0);
     if (!certSet) throw new Error("PKCS#7: no certificates present in bundle");
     const out = [];
@@ -824,7 +830,9 @@ function certsFromDER(bytes, filename){
       p = node.end;
       continue;
     }
-    out.push({ bytes: slice, label: out.length ? filename+" ["+n+"]" : filename });
+    // Numbered like the PKCS#7 path, first member included, so the
+    // two expansion paths label identically.
+    out.push({ bytes: slice, label: filename+" ["+n+"]" });
     n++;
     p = node.end;
   }
@@ -887,6 +895,10 @@ function extractCertBuffers(buf, filename){
   if (/^[\sA-Za-z0-9+/=]+$/.test(text) && text.trim().startsWith("MII")){
     return certsFromDER(b64ToBytes(text), filename);
   }
+  // openssl x509 -trustout armor carries auxiliary trust data after
+  // the certificate; naming it beats claiming the file is not PEM.
+  if (/-----BEGIN TRUSTED CERTIFICATE-----/.test(text))
+    throw new Error("TRUSTED CERTIFICATE PEM is not supported; re-export with openssl x509");
   throw derError || new Error("Unrecognized format (not DER, PKCS#7, PEM, or base64)");
 }
 
@@ -1106,6 +1118,7 @@ function parseCMS(bytes){
   let eContent = null;
   if (ek.length > 1){
     const wrap = children(bytes, ek[1])[0];
+    if (!wrap) throw new Error("Empty eContent wrapper");
     // contentOf assumes a primitive OCTET STRING; a constructed
     // definite-length encoding (BER) would silently digest segment
     // headers and misreport "content altered". DER requires primitive
@@ -1133,6 +1146,10 @@ function parseCMS(bytes){
   const digestAlgOID = decodeOID(contentOf(bytes, children(bytes, sik[p++])[0]));
   let signedAttrsNode = null;
   if (sik[p] && sik[p].cls === 2 && sik[p].tag === 0) signedAttrsNode = sik[p++];
+  // signatureAlgorithm and signature must both remain after the
+  // optional signedAttrs; the fixed-count check above ran before the
+  // optional field was consumed.
+  if (sik.length < p + 2) throw new Error("SignerInfo is truncated");
   const sigAlgNode = sik[p++];
   const sigAlgKids = children(bytes, sigAlgNode);
   const sigAlgOID = decodeOID(contentOf(bytes, sigAlgKids[0]));
@@ -1398,26 +1415,44 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
   const path = [signer.subjectCN||"?"];
   const now = new Date();
   for (let depth = 0; depth < 6 && !current.selfSigned; depth++){
-    const issuer = allCerts.find(c => bytesEqual(c.subjectBytes, current.issuerBytes));
     // Scope: Basic Constraints cA is enforced and the signer's
     // keyUsage is checked (warn above); keyCertSign on issuers,
     // pathLenConstraint, extended key usage, and unknown-critical-
     // extension rejection are not (full RFC 5280 path validation is
-    // beyond release verification). Issuer lookup takes the first
-    // subject match, so cross-signed CAs sharing a subject would need
-    // a try-all retry.
-    if (!issuer){ out.steps.push(["warn","Chain incomplete: issuer \""+(current.issuerCN||"?")+"\" not provided - drop the CA chain .pem"]); terminated = true; break; }
-    // A chain link must itself be a CA (Basic Constraints cA=TRUE).
-    // Without this check, any end-entity certificate could be used to
-    // mint a fake intermediate that verifies to a genuine root.
-    // Absent Basic Constraints is treated as cA=FALSE: v3 PKIs are
-    // assumed, so a v1 or extension-less issuer fails closed here
-    // rather than passing as a legacy root.
-    if (!issuer.isCA){ out.steps.push(["bad","Chain REJECTED: \""+(issuer.subjectCN||"?")+"\" is not a CA certificate (Basic Constraints) and cannot issue certificates"]); return untrustedManifest(out, eContent, "chain rejected"); }
-    let ok = false;
-    try { ok = await verifySig(issuer.spkiBytes, current.sigAlgOID, current.sigAlgParams, current.tbsBytes, current.signature, "SHA-256"); }
-    catch(e){ out.steps.push(["warn","Chain: "+e.message]); terminated = true; break; }
-    if (!ok){ out.steps.push(["bad","Chain signature INVALID: \""+(current.subjectCN||"?")+"\" not properly signed by \""+(issuer.subjectCN||"?")+"\""]); return untrustedManifest(out, eContent, "chain signature invalid"); }
+    // beyond release verification).
+    const candidates = allCerts.filter(c => bytesEqual(c.subjectBytes, current.issuerBytes));
+    if (!candidates.length){ out.steps.push(["warn","Chain incomplete: issuer \""+(current.issuerCN||"?")+"\" not provided - drop the CA chain .pem"]); terminated = true; break; }
+    // Cross-signed CAs and renewed generations share a subject; the
+    // link is verified against every same-subject candidate and the
+    // first that validates wins, so providing an extra wrong-key copy
+    // can never turn a good release red. A single candidate keeps the
+    // exact single-path diagnostics below.
+    let issuer = null;
+    if (candidates.length > 1){
+      for (const c of candidates){
+        if (!c.isCA) continue;
+        try { if (await verifySig(c.spkiBytes, current.sigAlgOID, current.sigAlgParams, current.tbsBytes, current.signature, "SHA-256")){ issuer = c; break; } }
+        catch(e){}
+      }
+      if (!issuer){
+        if (candidates.every(c=>!c.isCA)){ out.steps.push(["bad","Chain REJECTED: \""+(candidates[0].subjectCN||"?")+"\" is not a CA certificate (Basic Constraints) and cannot issue certificates"]); return untrustedManifest(out, eContent, "chain rejected"); }
+        out.steps.push(["bad","Chain signature INVALID: \""+(current.subjectCN||"?")+"\" not properly signed by any of the "+candidates.length+" certificates sharing the issuer subject"]);
+        return untrustedManifest(out, eContent, "chain signature invalid");
+      }
+    } else {
+      issuer = candidates[0];
+      // A chain link must itself be a CA (Basic Constraints cA=TRUE).
+      // Without this check, any end-entity certificate could be used
+      // to mint a fake intermediate that verifies to a genuine root.
+      // Absent Basic Constraints is treated as cA=FALSE: v3 PKIs are
+      // assumed, so a v1 or extension-less issuer fails closed here
+      // rather than passing as a legacy root.
+      if (!issuer.isCA){ out.steps.push(["bad","Chain REJECTED: \""+(issuer.subjectCN||"?")+"\" is not a CA certificate (Basic Constraints) and cannot issue certificates"]); return untrustedManifest(out, eContent, "chain rejected"); }
+      let ok = false;
+      try { ok = await verifySig(issuer.spkiBytes, current.sigAlgOID, current.sigAlgParams, current.tbsBytes, current.signature, "SHA-256"); }
+      catch(e){ out.steps.push(["warn","Chain: "+e.message]); terminated = true; break; }
+      if (!ok){ out.steps.push(["bad","Chain signature INVALID: \""+(current.subjectCN||"?")+"\" not properly signed by \""+(issuer.subjectCN||"?")+"\""]); return untrustedManifest(out, eContent, "chain signature invalid"); }
+    }
     if (issuer.notAfter < now) out.steps.push(["warn","Chain cert expired: "+(issuer.subjectCN||"?")]);
     if (issuer.notBefore > now) out.steps.push(["warn","Chain cert not yet valid: "+(issuer.subjectCN||"?")]);
     current = issuer;
@@ -1476,7 +1511,10 @@ const selected = new Set();
  */
 const chipColors = new Map();
 
-/** CSS class for a category's chip, assigning a palette slot on first use. */
+/** CSS class for a category's chip, assigning a palette slot on first
+    use. Never cleared, including by report Clear: a category keeps its
+    color across clears within the session, and growth is bounded by
+    the number of distinct categories a person actually types. */
 function chipClass(cat){
   if (!cat) return "chip";
   const k = cat.toLowerCase();
@@ -1502,9 +1540,12 @@ function certType(r){
 }
 
 /**
- * Searchable text for a row: every displayed field, lowercased. Shared
- * by render (highlighting) and the search handler (selection) so a
- * match means the same thing in both.
+ * Searchable text for a row: every displayed field plus the SHA-256
+ * thumbprint, lowercased. SHA-256 is not a table column, and matching
+ * it is deliberate: it lets a thumbprint from the CSV export or an
+ * external record locate its row, and a 64-hex-character query is
+ * never typed by accident. Shared by render (highlighting) and the
+ * search handler (selection) so a match means the same thing in both.
  */
 function rowHay(r){
   return (r.name+" "+r.org+" "+r.issuerCN+" "+r.cat+" "+r.ver+" "+r.rel+" "+certType(r)+" "+r.ocsp+" "+r.crl+" "+fmtDate(r.notBefore)+" "+fmtDate(r.notAfter)+" "+r.serial+" "+r.key+" "+r.sigAlg+" "+r.thumb1+" "+r.thumb256).toLowerCase();
@@ -1619,10 +1660,8 @@ const errBox = document.getElementById("errors");
  * multiple encodings, or two overlapping drops, cannot double rows.
  * @returns {{added:number, dupes:number}}
  */
-async function importBuffer(buf, filename){
-  const cat = document.getElementById("bCat").value.trim();
-  const ver = document.getElementById("bVer").value.trim();
-  const rel = document.getElementById("bRel").value.trim();
+async function importBuffer(buf, filename, batch){
+  const { cat, ver, rel } = batch;
   const meta = bundleMeta(filename);
   const useCat = cat || meta.cat || "";
   const useVer = ver || meta.ver || "";
@@ -1645,7 +1684,11 @@ async function importBuffer(buf, filename){
                 thumb1: await digestHex("SHA-1", c.raw),
                 thumb256,
                 ocsp: c.ocsp, crl: c.crl, isCA: c.isCA, selfSigned: c.selfSigned,
-                subjectCN: c.subjectCN, raw: c.raw });
+                // Copied: c.raw is a subarray pinning the whole
+                // dropped file's buffer; one certificate from a large
+                // bundle must not keep the file alive for the row's
+                // lifetime.
+                subjectCN: c.subjectCN, raw: c.raw.slice() });
     added++;
   }
   return { added, dupes };
@@ -1674,12 +1717,22 @@ function handleFiles(fileList){
 }
 async function handleFilesWork(fileList){
   errBox.style.display = "none"; errBox.innerHTML = "";
+  // An export notice describes the report as it was exported; new
+  // imports make it stale.
+  const en = document.getElementById("exportNotice");
+  en.style.display = "none"; en.textContent = "";
   const errs = [];
   let dupes = 0;
+  // Snapshotted once per drop: the queue serializes drops but not
+  // field edits, so reading per buffer would label later files in the
+  // same drop differently from earlier ones.
+  const batch = { cat: document.getElementById("bCat").value.trim(),
+                  ver: document.getElementById("bVer").value.trim(),
+                  rel: document.getElementById("bRel").value.trim() };
   for (const f of fileList){
     try {
       const buf = await f.arrayBuffer();
-      dupes += (await importBuffer(buf, f.name)).dupes;
+      dupes += (await importBuffer(buf, f.name, batch)).dupes;
     } catch(e){
       errs.push(f.name + " - " + e.message);
     }
@@ -1749,15 +1802,25 @@ document.getElementById("selAll").addEventListener("change", e=>{
 });
 document.getElementById("search").addEventListener("input", e=>{
   searchQuery = e.target.value.trim().toLowerCase();
-  if (!searchQuery) lastFirstHit = null;
   // Matching rows are also check-selected, so a search doubles as a
-  // selection tool feeding the exports. Selection is replaced on each
-  // query change (checkbox edits after that stand until the query
-  // changes again); clearing the query keeps the last selection, since
-  // an invisible reset would discard the set the search just built.
-  if (searchQuery){
+  // selection tool feeding the exports; export while the query is
+  // active. Selection is replaced on each query change (checkbox
+  // edits after that stand until the query changes again), and
+  // clearing the query clears the selection with it: an emptied
+  // search box means the search-built set is done. A zero-hit query
+  // changes nothing, since clearing on a typo would empty the
+  // selection and exports fall back to ALL rows, silently widening a
+  // trust-store bundle from a curated subset to everything.
+  if (!searchQuery){
+    lastFirstHit = null;
     selected.clear();
-    for (const r of rows) if (rowHay(r).includes(searchQuery)) selected.add(r.id);
+  }
+  if (searchQuery){
+    const matches = rows.filter(r => rowHay(r).includes(searchQuery));
+    if (matches.length){
+      selected.clear();
+      for (const r of matches) selected.add(r.id);
+    }
   }
   render();
   if (searchQuery){
@@ -2175,10 +2238,10 @@ function vRender(){
     if (vState.lastResult && vState.lastResult.contentName === name) continue;
     parts.push('<div class="vline vwarn">\u26A0 '+esc(name)+' - '+esc(msg)+'</div>');
   }
-  // lastResult renders even with cms null: a signature file that failed
-  // to parse stores its error there, and that error must be shown
-  // rather than the missing-manifest hint.
-  if (!vState.cms && !vState.lastResult){
+  // Signature parse failures land in sigNotes (rendered above), and
+  // lastResult exists only when a CMS parsed, so no-cms means no
+  // pipeline output and the hint renders alone.
+  if (!vState.cms){
     parts.push('<div class="vline vwarn">\u26A0 No signature file loaded yet - drop one to verify signatures</div>');
   } else if (vState.lastResult){
     for (const [kind,msg] of vState.lastResult.steps){
@@ -2458,7 +2521,9 @@ async function vHandleFilesWork(fileList){
         // ordinary content and a loaded signature stays loaded. The
         // note holds the display text; read failures reuse the same
         // channel with their own message.
-        vState.sigNotes.set(f.name, "no signature found inside; treated as content");
+        vState.sigNotes.set(f.name, vState.cms
+          ? "no signature found inside; treated as content (the previously loaded signature remains in effect)"
+          : "no signature found inside; treated as content");
       }
     }
     // A re-dropped file replaces its pending bytes, so any cached
@@ -2543,14 +2608,19 @@ function vImportFiles(names){
   return run;
 }
 async function vImportFilesWork(names){
+  const en = document.getElementById("exportNotice");
+  en.style.display = "none"; en.textContent = "";
   const errs = [];
   let added = 0, dupes = 0;
+  const batch = { cat: document.getElementById("bCat").value.trim(),
+                  ver: document.getElementById("bVer").value.trim(),
+                  rel: document.getElementById("bRel").value.trim() };
 
   for (const name of names){
     const bytes = vState.pending.get(name);
     if (!bytes) continue;
     try {
-      const r = await importBuffer(bytes, name);
+      const r = await importBuffer(bytes, name, batch);
       added += r.added; dupes += r.dupes;
     } catch(e){ errs.push(name + " - " + e.message); }
   }
@@ -2643,8 +2713,10 @@ async function cmpHandleFilesWork(side, fileList){
       for (const item of extractCertBuffers(buf, f.name)){
         const c = parseCertificate(item.bytes);
         const key = await digestHex("SHA-256", c.raw);
-        if (!cmpState[side].has(key))
+        if (!cmpState[side].has(key)){
+          c.raw = c.raw.slice(); // release the source file buffer
           cmpState[side].set(key, { c, thumb1: await digestHex("SHA-1", c.raw) });
+        }
       }
     } catch(e){ cmpState.errs[side].push(f.name+": "+e.message); }
   }
