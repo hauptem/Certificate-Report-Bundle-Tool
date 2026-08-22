@@ -321,7 +321,7 @@
     <p>To verify a release, drop all of its files into the zone: the signature file, the chain file if there is one, and the bundle files. The tool checks the manifest signature, builds the signer's chain, and compares every file against the signed manifest. Problems are marked in red, warnings in amber, and each file row shows the manifest hash next to the computed one.</p>
     <p>The tool never trusts the root certificate, since it came in the same download. It shows the root's fingerprints instead. Compare one of them against the value the issuing authority publishes, and the release is verified once that matches and everything else is clean.</p>
     <p>Use the Import buttons in the results to send a verified file's certificates to the report without dropping it again.</p>
-    <p>Signature files are recognized by their extension (<code>.sha256</code>, <code>.sha384</code>, <code>.sha512</code>, <code>.p7s</code>, <code>.p7m</code>, <code>.sig</code>), and the manifest must be sha256sum, sha384sum, or sha512sum output. Attached and detached signatures both work, with RSA PKCS#1 v1.5, RSA-PSS, or ECDSA on P-256, P-384, or P-521. Co-signed releases are checked against the first signer only.</p>
+    <p>Signature files are recognized by their extension (<code>.sha256</code>, <code>.sha384</code>, <code>.sha512</code>, <code>.p7s</code>, <code>.p7m</code>, <code>.sig</code>), and the manifest must be sha256sum, sha384sum, or sha512sum output. Attached and detached signatures both work, with RSA PKCS#1 v1.5, RSA-PSS, or ECDSA on P-256, P-384, or P-521. Co-signed releases are checked against the first signer only, and chain building assumes v3 certificates: an issuer without Basic Constraints is rejected as a non-CA.</p>
 
     <h2>Import</h2>
     <p>Drop certificate files into the zone. DER, PEM, headerless Base64, and PKCS#7 bundles are all accepted, and bundles expand to one row per certificate. Certificates already in the report are skipped, so the same bundle in two encodings won't create duplicates.</p>
@@ -1061,7 +1061,9 @@ function parseCMS(bytes){
  * Parse checksum-utility manifest lines: "<hex>  <filename>" or
  * "<hex> *<filename>". Hex length selects the algorithm:
  * 64 => SHA-256, 96 => SHA-384, 128 => SHA-512.
- * @returns {Map<string, {hash:string, alg:string}>} keyed by exact
+ * @returns {Map<string, {hash:string, alg:string, display:string}>}
+ *          display is the filename as written in the manifest, used
+ *          verbatim in results rows; the map is keyed by exact
  *          filename, so entries differing only by case (legal on
  *          case-sensitive filesystems) stay distinct. Lookups go
  *          through manifestEntry for case-insensitive matching.
@@ -1133,6 +1135,9 @@ function manifestEntry(manifest, name){
  */
 async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
   const out = { steps: [], manifest: null, ok: false, contentName: null, chainComplete: false };
+  // Named first so every failure below is attributable to a specific
+  // signature file; a second drop can never fail anonymously.
+  out.steps.push(["info","Signature file: "+cmsName]);
   const allCerts = cms.certs.concat(pool);
   // Locate the signer certificate by issuer and serial number among
   // CMS-embedded certificates and the externally provided pool.
@@ -1152,7 +1157,6 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
     out.steps.push(["bad","CMS signedAttrs are missing the required messageDigest attribute (RFC 5652 11.2)"]);
     return out;
   }
-  out.steps.push(["info","Signature file: "+cmsName]);
   out.steps.push(["ok","Signer: "+(signer.subjectCN||"(no CN)")]);
   if (signer.notAfter < new Date())
     out.steps.push(["warn","Signer certificate expired "+signer.notAfter.toISOString().slice(0,10)]);
@@ -1173,7 +1177,9 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
   // direct signature verification otherwise.
   let eContent = cms.eContent;
   if (!eContent){
-    if (!pending || !pending.size){
+    // A multipart/signed file carries its own content part, so an
+    // otherwise-empty drop can still resolve.
+    if ((!pending || !pending.size) && !smimeContent){
       out.steps.push(["bad","Detached signature: drop the signed content file (the hash manifest) alongside the signature file"]);
       return out;
     }
@@ -1274,6 +1280,9 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
     // A chain link must itself be a CA (Basic Constraints cA=TRUE).
     // Without this check, any end-entity certificate could be used to
     // mint a fake intermediate that verifies to a genuine root.
+    // Absent Basic Constraints is treated as cA=FALSE: v3 PKIs are
+    // assumed, so a v1 or extension-less issuer fails closed here
+    // rather than passing as a legacy root.
     if (!issuer.isCA){ out.steps.push(["bad","Chain REJECTED: \""+(issuer.subjectCN||"?")+"\" is not a CA certificate (Basic Constraints) and cannot issue certificates"]); return out; }
     let ok = false;
     try { ok = await verifySig(issuer.spkiBytes, current.sigAlgOID, current.sigAlgParams, current.tbsBytes, current.signature, "SHA-256"); }
@@ -1931,7 +1940,7 @@ function vRender(){
   // to parse stores its error there, and that error must be shown
   // rather than the missing-manifest hint.
   if (!vState.cms && !vState.lastResult){
-    parts.push('<div class="vline vwarn">\u26A0 No .sha256 manifest file loaded yet - drop it to verify signatures</div>');
+    parts.push('<div class="vline vwarn">\u26A0 No signature file loaded yet - drop one to verify signatures</div>');
   } else if (vState.lastResult){
     for (const [kind,msg] of vState.lastResult.steps){
       if (kind === "ok" || kind === "info"){
@@ -1953,7 +1962,7 @@ function vRender(){
   if (vState.pending.size){
     parts.push('<div class="vfiles">');
     if (vState.importable.size > 1)
-      parts.push('<div class="vline"><button class="vimp" data-name="*" title="Add every certificate file below to the report">Import all certificate files ('+vState.importable.size+')</button></div>');
+      parts.push('<div class="vline"><button class="vimp" data-all="1" title="Add every certificate file below to the report">Import all certificate files ('+vState.importable.size+')</button></div>');
     /* One row per file, in the same table format as the report:
        Import | File Name | Status | Manifest Hash | Computed Hash.
        stText is trusted markup; callers escape any file-derived
@@ -2065,8 +2074,12 @@ async function vRun(){
       const digests = {};
       for (const alg of algs) digests[alg] = await digestHex(alg, bytes);
       for (const [mkey, entry] of manifest){
-        const satisfiedByName = [...vState.pending.keys()].some(k=>k.toLowerCase()===mkey.toLowerCase());
-        if (satisfiedByName) continue;
+        // An entry is satisfied by name only when its named file's
+        // hash matched; a mismatched named file leaves the entry open
+        // so a renamed good copy can still claim it by content. The
+        // mismatch row stays loud either way.
+        const namedKey = [...vState.pending.keys()].find(k=>k.toLowerCase()===mkey.toLowerCase());
+        if (namedKey && vState.fileHashes.get(namedKey) === entry.hash) continue;
         if (digests[entry.alg] === entry.hash){
           vState.aliasMatch.set(name, mkey);
           vState.fileHashes.set(name, digests[entry.alg]);
@@ -2225,7 +2238,9 @@ async function vImportFiles(names){
 vResults.addEventListener("click", async e=>{
   const btn = e.target.closest ? e.target.closest(".vimp") : null;
   if (!btn || btn.disabled) return;
-  const names = btn.dataset.name === "*" ? [...vState.importable] : [btn.dataset.name];
+  // data-all marks the import-all button; a filename sentinel would
+  // collide with a file literally named "*", legal on POSIX.
+  const names = btn.dataset.all ? [...vState.importable] : [btn.dataset.name];
   btn.disabled = true;
   await vImportFiles(names);
   // Feedback is a brief color change only; the label never changes, so

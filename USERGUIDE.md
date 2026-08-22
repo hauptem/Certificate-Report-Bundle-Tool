@@ -12,7 +12,7 @@ The tool never trusts the root certificate, since it came in the same download. 
 
 Use the Import buttons in the results to send a verified file's certificates to the report without dropping it again.
 
-Signature files are recognized by their extension (`.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, `.sig`), and the manifest must be sha256sum, sha384sum, or sha512sum output. Attached and detached signatures both work, with RSA PKCS#1 v1.5, RSA-PSS, or ECDSA on P-256, P-384, or P-521. Co-signed releases are checked against the first signer only.
+Signature files are recognized by their extension (`.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, `.sig`), and the manifest must be sha256sum, sha384sum, or sha512sum output. Attached and detached signatures both work, with RSA PKCS#1 v1.5, RSA-PSS, or ECDSA on P-256, P-384, or P-521. Co-signed releases are checked against the first signer only, and chain building assumes v3 certificates: an issuer without Basic Constraints is rejected as a non-CA.
 
 ## Import
 
