@@ -512,6 +512,12 @@ function decodeTime(b, node){
   const off = s.match(/([+-])(\d{2})(\d{2})$/);
   if (off) offMin = (off[1] === "-" ? -1 : 1) * (+off[2]*60 + +off[3]);
   const f = off ? s.slice(0, -5) : s;
+  // Minimum digits before optional seconds: YYMMDDHHMM (UTCTime) or
+  // YYYYMMDDHH (GeneralizedTime), ten either way. A shorter all-digit
+  // string would slice empty fields to "" and +"" is 0, decoding a
+  // truncated date to a silently wrong one; Invalid Date makes
+  // fmtDate render its unreadable marker instead.
+  if (!/^\d{10}/.test(f)) return new Date(NaN);
   let Y,M,D,h,m,sec;
   if (node.tag === 23){ // UTCTime YYMMDDHHMMSSZ
     const yy = parseInt(f.slice(0,2),10);
@@ -1027,6 +1033,7 @@ function spkiCurve(spki){
 function derSigToRaw(sig, size){
   const root = readTLV(sig, 0);
   const [rN, sN] = children(sig, root);
+  if (!rN || !sN) throw new Error("ECDSA signature must contain r and s INTEGERs");
   /* Strip leading zero octets and left-pad an INTEGER to curve size.
      Oversize after stripping means the value cannot belong to the
      curve; a named error replaces the RangeError a negative offset
@@ -1190,6 +1197,7 @@ function parseCMS(bytes){
   if (sik.length < p + 2) throw new Error("SignerInfo is truncated");
   const sigAlgNode = sik[p++];
   const sigAlgKids = children(bytes, sigAlgNode);
+  if (!sigAlgKids.length) throw new Error("SignerInfo signatureAlgorithm is empty");
   const sigAlgOID = decodeOID(contentOf(bytes, sigAlgKids[0]));
   const sigAlgParams = sigAlgKids.length > 1 && sigAlgKids[1].tag !== 5 ? bytesOf(bytes, sigAlgKids[1]) : null;
   const sigBytes = contentOf(bytes, sik[p]);
@@ -1209,7 +1217,11 @@ function parseCMS(bytes){
     raw[0] = 0x31;
     signedAttrsForVerify = raw;
     for (const attr of children(bytes, signedAttrsNode)){
+      // Attribute ::= SEQUENCE { attrType OID, attrValues SET }
+      // (RFC 5652 5.3); fewer children is malformed, named here so the
+      // sigNote stays actionable.
       const ak = children(bytes, attr);
+      if (ak.length < 2) throw new Error("Signed attribute is missing its value set");
       const attrOID = decodeOID(contentOf(bytes, ak[0]));
       if (attrOID === OID_MSGDIGEST){
         const val = children(bytes, ak[1])[0];
@@ -1599,7 +1611,11 @@ function chipClass(cat){
 
 /** Format a Date as M/D/YYYY in UTC, matching certificate validity. */
 function fmtDate(d){
-  if (!(d instanceof Date) || isNaN(d)) return "";
+  // A date that failed to parse must say so: an empty cell reads as
+  // absent, and elsewhere this file fails loud. Sorting and the
+  // expired flag cannot evaluate an Invalid Date; the marker is the
+  // indication.
+  if (!(d instanceof Date) || isNaN(d)) return "unreadable";
   return (d.getUTCMonth()+1)+"/"+d.getUTCDate()+"/"+d.getUTCFullYear();
 }
 
@@ -1655,6 +1671,14 @@ function esc(s){
 function render(){
   const tb = document.getElementById("tbody");
   const now = new Date();
+  // The rebuild replaces tbody.innerHTML wholesale, which destroys the
+  // focused element and returns a keyboard user to the top of the tab
+  // order on every checkbox toggle. Focus is restored by data-id and
+  // tag after the rebuild; a deleted row's id finds nothing and focus
+  // falls through, which is the honest outcome.
+  const ae = document.activeElement;
+  const refocus = ae && ae.dataset && ae.dataset.id && tb.contains && tb.contains(ae)
+    ? { id: ae.dataset.id, tag: ae.tagName } : null;
 
   const sorted = [...rows].sort((a,b)=>{
     let va, vb;
@@ -1712,6 +1736,10 @@ function render(){
   const selAll = document.getElementById("selAll");
   selAll.checked = rows.length > 0 && selected.size === rows.length;
   selAll.indeterminate = selected.size > 0 && selected.size < rows.length;
+  if (refocus && tb.querySelector){
+    const el = tb.querySelector(refocus.tag.toLowerCase()+'[data-id="'+refocus.id+'"]');
+    if (el && el.focus) el.focus();
+  }
   document.getElementById("export").disabled = !rows.length;
   document.getElementById("exportHtml").disabled = !rows.length;
   document.getElementById("exportPem").disabled = !rows.length;
@@ -2114,6 +2142,10 @@ function b64Wrap(bytes){
  * Returns the chosen filename, or null on cancel.
  */
 async function saveBlob(data, type, defaultName){
+  // null is either a user cancel or a suppressed prompt (embedded
+  // contexts, repeated-dialog throttling); the two are not
+  // distinguishable from here. Silent cancel is the design; the
+  // suppression case is accepted for the file:// target.
   let name = window.prompt("File name:", defaultName);
   if (name === null) return null;
   name = name.trim() || defaultName;
@@ -2856,7 +2888,7 @@ function cmpRender(){
   document.getElementById("cmpCountRef").textContent  = cmpState.ref.size  ? cmpState.ref.size+" certificate(s)"  : "empty";
   document.getElementById("cmpCountComp").textContent = cmpState.comp.size ? cmpState.comp.size+" certificate(s)" : "empty";
   const parts = [];
-  if (errs && errs.length)
+  if (errs.length)
     for (const e of errs) parts.push('<div class="vline vbad"><span class="mark">\u2717</span> '+esc(e)+'</div>');
   const toggle = document.getElementById("cmpToggle");
   const haveBoth = cmpState.ref.size > 0 && cmpState.comp.size > 0;
