@@ -1128,6 +1128,9 @@ function manifestEntry(manifest, name){
  *          chainComplete: true only when the chain reached a verified
  *          self-signed root; vRender withholds the green file verdict
  *          without it, since the fingerprint comparison needs a root.
+ *          untrustedReason: set when a fatal exit after content
+ *          resolution still attached the parsed manifest for triage;
+ *          every row is caveated and none renders green.
  *
  * Fatal ("bad", pipeline stops): signer not found (with a distinct
  * message for the unsupported subjectKeyIdentifier form), signedAttrs
@@ -1144,6 +1147,23 @@ function manifestEntry(manifest, name){
  * out-of-band comparison; roots are never implicitly trusted, so this
  * guidance always accompanies a verified chain.
  */
+/**
+ * Attach a parsed-but-untrusted manifest to a fatal result so the file
+ * table can still show which file's hash differs. Triage of a bad
+ * release needs exactly that answer, and withholding the comparison
+ * because the signature failed hides it at the moment it matters.
+ * vRender caveats every row and never shows the green verdict when
+ * untrustedReason is set.
+ */
+function untrustedManifest(out, eContent, reason){
+  if (eContent){
+    out.manifest = parseManifest(eContent);
+    if (out.manifest.size) out.untrustedReason = reason;
+    else out.manifest = null;
+  }
+  return out;
+}
+
 async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
   const out = { steps: [], manifest: null, ok: false, contentName: null, chainComplete: false };
   // Named first so every failure below is attributable to a specific
@@ -1251,11 +1271,11 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
     }
     if (cms.eContentType && cms.contentTypeAttr !== cms.eContentType){
       out.steps.push(["bad","content-type attribute does not match eContentType - structure altered"]);
-      return out;
+      return untrustedManifest(out, eContent, "structure altered");
     }
     if (cms.msgDigestAttr !== contentHash){
       out.steps.push(["bad","Content digest does not match signed messageDigest attribute - content altered"]);
-      return out;
+      return untrustedManifest(out, eContent, "content altered");
     }
     out.steps.push(["ok","Content digest matches signed attributes ("+hashName+")"]);
   }
@@ -1266,8 +1286,8 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
   const signedData = cms.signedAttrsForVerify || eContent;
   let sigOK = false;
   try { sigOK = await verifySig(signer.spkiBytes, cms.sigAlgOID, cms.sigAlgParams, signedData, cms.sigBytes, hashName); }
-  catch(e){ out.steps.push(["bad","Signature verification error: "+e.message]); return out; }
-  if (!sigOK){ out.steps.push(["bad","SIGNATURE INVALID - manifest cannot be trusted"]); return out; }
+  catch(e){ out.steps.push(["bad","Signature verification error: "+e.message]); return untrustedManifest(out, eContent, "signature unverified"); }
+  if (!sigOK){ out.steps.push(["bad","SIGNATURE INVALID - manifest cannot be trusted"]); return untrustedManifest(out, eContent, "signature invalid"); }
   const algName = ECDSA_SIG_OIDS[cms.sigAlgOID] ? "ECDSA" : cms.sigAlgOID === OID_RSA_PSS ? "RSA-PSS" : "RSA";
   out.steps.push(["ok","Manifest signature valid ("+algName+")"]);
 
@@ -2021,7 +2041,7 @@ function vRender(){
   const impBtn = (name)=>vState.importable.has(name)
     ? '<button class="vimp" data-name="'+esc(name)+'" title="Add this file\'s certificates to the report">Import</button>'
     : "";
-  const manifest = vState.lastResult && vState.lastResult.ok ? vState.lastResult.manifest : null;
+  const manifest = vState.lastResult ? vState.lastResult.manifest : null;
   if (vState.pending.size){
     parts.push('<div class="vfiles">');
     const eligible = vImportEligible();
@@ -2056,10 +2076,17 @@ function vRender(){
         const hash = vState.fileHashes.get(name);
         if (expected === hash){
           // A matching hash proves the manifest covers this file; the
-          // green verdict additionally requires the signer's chain to
-          // have reached a root, since the fingerprint comparison is
-          // the trust decision and it needs a root to compare.
-          if (vState.lastResult.chainComplete)
+          // green verdict additionally requires a trusted manifest
+          // (untrustedReason unset) and a chain that reached a root,
+          // since the fingerprint comparison is the trust decision.
+          // Signer expiry does not demote the verdict: archived
+          // releases are legitimately re-verified years after their
+          // signer expired, the signature was made in validity, and
+          // the pipeline's warn line already carries the date.
+          const ur = vState.lastResult.untrustedReason;
+          if (ur)
+            push(frow(name, name, "st-warn", "Matches UNTRUSTED manifest ("+esc(ur)+")", expected, hash), name);
+          else if (vState.lastResult.chainComplete)
             push(frow(name, name, "st-ok", "\u2713 Matches signed manifest", expected, hash), name);
           else
             push(frow(name, name, "st-warn", "Matches manifest (signer chain unverified)", expected, hash), name);
@@ -2070,9 +2097,13 @@ function vRender(){
       // Group 1b: files matched to manifest entries by content hash.
       for (const [name, mkey] of vState.aliasMatch){
         const entry = manifest.get(mkey);
+        const aliasTrusted = !vState.lastResult.untrustedReason && vState.lastResult.chainComplete;
+        const aliasSuffix = vState.lastResult.untrustedReason
+          ? " (UNTRUSTED manifest: "+esc(vState.lastResult.untrustedReason)+")"
+          : (vState.lastResult.chainComplete ? "" : " (signer chain unverified)");
         push(frow(name, name,
-          vState.lastResult.chainComplete ? "st-ok" : "st-warn",
-          (vState.lastResult.chainComplete ? "\u2713 " : "")+"Matches "+esc(entry.display || mkey)+" (filename differs)"+(vState.lastResult.chainComplete ? "" : " (signer chain unverified)"),
+          aliasTrusted ? "st-ok" : "st-warn",
+          (aliasTrusted ? "\u2713 " : "")+"Matches "+esc(entry.display || mkey)+" (filename differs)"+aliasSuffix,
           entry.hash, vState.fileHashes.get(name)), name);
       }
       // Group 2: manifest entries with no corresponding provided file.
@@ -2121,7 +2152,7 @@ async function vRun(){
     catch(e){ vState.lastResult = { steps: [["bad","Verification failed: "+e.message]], manifest: null, ok: false }; }
   }
   vState.aliasMatch.clear();
-  const manifest = vState.lastResult && vState.lastResult.ok ? vState.lastResult.manifest : null;
+  const manifest = vState.lastResult ? vState.lastResult.manifest : null;
   if (manifest && manifest.size){
     // Stage 1: name-listed files, hashed with their entry's algorithm.
     for (const [name, bytes] of vState.pending){
@@ -2288,11 +2319,15 @@ vdrop.addEventListener("drop", e=>vHandleFiles([...e.dataTransfer.files]));
  * path can never import content the manifest just rejected.
  */
 function vImportEligible(){
-  const manifest = vState.lastResult && vState.lastResult.ok ? vState.lastResult.manifest : null;
+  const manifest = vState.lastResult ? vState.lastResult.manifest : null;
+  const untrusted = vState.lastResult && vState.lastResult.untrustedReason;
   return [...vState.importable].filter(name=>{
     if (!manifest) return true;
     const hit = manifestEntry(manifest, name);
     if (!hit) return true; // not covered by the manifest: user's call
+    // A match against an untrusted manifest proves nothing; only a
+    // match under a verified signature qualifies for the bulk path.
+    if (untrusted) return false;
     return vState.fileHashes.get(name) === hit.entry.hash;
   });
 }
