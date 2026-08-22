@@ -2,7 +2,7 @@
 
 A single HTML file that inspects X.509 certificates, verifies signed bundle releases, exports certificate bundles in various formats, and exports a csv for certs/bundles displaying all relevant information. 
 
-Usage: Open `Certificate Report Bundle Tool.html` in a modern browser.
+Usage: Open `Certificate_Report_Bundle_Tool.html` in a modern browser.
 
 <img width="2048" height="1078" alt="Image" src="https://github.com/user-attachments/assets/7e9d5675-28ba-4258-8dcb-9799bd63c2e7" />
 
@@ -16,7 +16,7 @@ Usage: Open `Certificate Report Bundle Tool.html` in a modern browser.
 
 **Import.** Reads DER, PEM, headerless Base64, and PKCS#7 bundles. Certificates already in the report are skipped rather than added again.
 
-**Report.** One row per certificate: subject, issuer, validity dates, serial number, key and signature algorithms, SHA-1 thumbprint, OCSP and CRL URLs, and certificate type. Expired certificates are flagged in red. The search box highlights matching rows across all columns, including serials and thumbprints. Checkboxes select specific rows for export. Clicking a certificate's name opens its PEM in a popup with a Copy button.
+**Report.** One row per certificate: subject, issuer, validity dates, serial number, key and signature algorithms, SHA-1 thumbprint, OCSP and CRL URLs, and certificate type. Expired certificates are flagged in red, and not-yet-valid certificates in amber. The search box highlights matching rows across all columns, including serials and thumbprints. Checkboxes select specific rows for export. Clicking a certificate's name opens its PEM in a popup with a Copy button.
 
 **Compare.** Diffs two certificate sets in a report-style table. 
 
@@ -26,7 +26,7 @@ Usage: Open `Certificate Report Bundle Tool.html` in a modern browser.
 
 - This tool **never** modifies certificate data. Certificates are held as bytes they import as, and every export writes those same bytes back out; conversion between PEM and P7B only changes the container around them. The P7B export is the standard certificates-only PKCS#7 structure (RFC 2315), equivalent to `openssl crl2pkcs7 -nocrl` output, and the round trip has been verified byte-for-byte against openssl. Every .cer, PEM, and P7B export additionally re-reads its own output before writing and is refused unless each certificate reads back byte-identical to the report. Certificate creation and key handling are out of scope for this tool.
 - This tool does not perform external revocation status checks. OCSP and CRL URLs are simply captured from the certs and presented for review. 
-- Signed manifests must be in sha256sum, sha384sum, or sha512sum format. Signature files are recognized by the extensions `.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, and `.sig`
+- Signed manifests must be in sha256sum, sha384sum, or sha512sum format, or openssl dgst BSD-style lines (SHA256 (name) = hex). Signature files are recognized by the extensions `.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, and `.sig`
 - Folder drag-and-drop is not supported for pages opened from disk. Select all the files directly and drop them into the tool.
 
 ## Documentation

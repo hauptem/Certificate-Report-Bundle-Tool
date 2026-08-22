@@ -1,6 +1,6 @@
 # Certificate Report/Bundle Tool - User Guide
 
-Open `Certificate Report Bundle Tool.html` in a modern browser.
+Open `Certificate_Report_Bundle_Tool.html` in a modern browser.
 
 The tool has three sections: Verify checks a signed release, Import reads certificates into the report, and Report displays and exports them.
 
