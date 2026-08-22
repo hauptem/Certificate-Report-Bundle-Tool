@@ -3,7 +3,7 @@
   =============================================================================
   Certificate Report/Bundle Tool
   =============================================================================
-  Version: v1.2
+  Version: v1.3
   Author: Eric Haupt
   Released under the MIT License.
   https://github.com/hauptem/Certificate-Report-Bundle-Tool
@@ -121,7 +121,14 @@
   button.export:hover:not(:disabled){background:#34754d;border-color:#52996f}
   button:disabled{opacity:.4;cursor:default}
   button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-  #compareBtn,#guideBtn,#vclear,#clear,#cmpClose,#guideClose{width:92px;padding-left:0;padding-right:0;text-align:center}
+  #compareBtn,#guideBtn,#vclear,#clear,#cmpClose,#guideClose,#pemClose,#pemCopy{width:92px;padding-left:0;padding-right:0;text-align:center}
+  td.certname{cursor:pointer}
+  td.certname:hover{text-decoration:underline;color:#1f5faf}
+  dialog#pemview{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.7);padding:0;width:19vw;max-width:none;margin:auto;overflow:hidden}
+  dialog#pemview::backdrop{background:rgba(0,0,0,.6)}
+  #pemBody{display:block;width:100%;height:60.5vh;background:#ffffff;color:#111417;border:none;resize:none;padding:16px 20px;font-family:var(--mono);font-size:12px;line-height:1.45;white-space:pre;overflow:auto}
+  #pemBody:focus{outline:none}
+  #pemCopy.done{background:#2d6642;border-color:#478a63}
   #exportCer,#exportPem,#exportP7b,#export,#exportHtml{width:150px;padding-left:0;padding-right:0;text-align:center}
 
   .tablewrap{overflow-x:auto;background:#ffffff}
@@ -289,6 +296,14 @@
   </div>
 </dialog>
 
+<dialog id="pemview" aria-labelledby="pemTitle">
+  <div class="guide-h"><b id="pemTitle">Certificate PEM</b>
+    <span class="titlebtns">
+      <button id="pemCopy" title="Copy PEM to clipboard">Copy</button>
+      <button id="pemClose" title="Close">Close</button>
+    </span></div>
+  <textarea id="pemBody" readonly spellcheck="false" wrap="off" aria-label="PEM data"></textarea>
+</dialog>
 <dialog id="guide" aria-labelledby="guideTitle">
   <div class="guide-h">
     <b id="guideTitle">User Guide</b>
@@ -308,7 +323,7 @@
     <p>Fill in Category, Version, or Release Date before dropping to label everything in that drop. Filenames like <code>certificates_pkcs7_v2_1_internal</code> fill Category and Version automatically when you leave them blank.</p>
 
     <h2>Report</h2>
-    <p>Each certificate is a row showing its subject, issuer, validity, serial, algorithms, thumbprint, revocation URLs, and type, with expired and not-yet-valid certificates flagged. Sort by clicking the Certificate Name or Expiration header, and use the search box to highlight matches anywhere in the table. Check rows to select them for export, or remove them individually with the button at the end of each row.</p>
+    <p>Each certificate is a row showing its subject, issuer, validity, serial, algorithms, thumbprint, revocation URLs, and type, with expired and not-yet-valid certificates flagged. Sort by clicking the Certificate Name or Expiration header, and use the search box to highlight matches anywhere in the table. Check rows to select them for export, or remove them individually with the button at the end of each row. Click a certificate's name to view its PEM in a popup with a Copy button, for pasting into anything that accepts PEM directly.</p>
 
     <h2>Compare</h2>
     <p>Compare, in the title bar, diffs two certificate sets. Drop the baseline on the Reference side and the set you're evaluating on the Comparison side; differences appear as a table once both sides have certificates. Matching uses the full subject, so same-named certificates from different organizations aren't confused.</p>
@@ -1291,7 +1306,7 @@ function render(){
       return '<tr class="'+trClass+'">' +
         '<td class="selcol"><input type="checkbox" class="sel" data-id="'+r.id+'"'+(selected.has(r.id)?' checked':'')+' aria-label="Select row"></td>' +
         '<td>'+(r.cat ? '<span class="'+chipClass(r.cat)+'">'+esc(r.cat)+'</span>' : '')+'</td>' +
-        '<td>'+esc(r.name)+'</td>' +
+        '<td class="certname" data-id="'+r.id+'" title="Show PEM">'+esc(r.name)+'</td>' +
         '<td>'+esc(r.ver)+'</td>' +
         '<td>'+esc(r.rel)+'</td>' +
         '<td>'+esc(r.org)+'</td>' +
@@ -2224,6 +2239,44 @@ for (const [side, zoneId, fileId, clearId] of [["ref","cmpZoneRef","cmpFileRef",
   input.addEventListener("change", e=>{ cmpHandleFiles(side, [...e.target.files]); input.value=""; });
   document.getElementById(clearId).addEventListener("click", ()=>{ cmpState[side].clear(); cmpRender(); });
 }
+
+/* PEM view dialog: click a certificate name in the report to see that
+   certificate's PEM for copy/paste (e.g. into an appliance GUI that
+   only accepts PEM). The PEM is armored from the row's stored DER, the
+   same bytes every export writes. Copy feedback is a color flash; the
+   button label never changes, so the layout never shifts. */
+const pemDlg = document.getElementById("pemview");
+function certToPem(r){
+  return "-----BEGIN CERTIFICATE-----\n"+b64Wrap(r.raw)+"\n-----END CERTIFICATE-----\n";
+}
+document.getElementById("tbody").addEventListener("click", e=>{
+  const cell = e.target.closest ? e.target.closest("td.certname") : null;
+  if (!cell) return;
+  const r = rows.find(x=>x.id === +cell.dataset.id);
+  if (!r) return;
+  document.getElementById("pemTitle").textContent = r.name;
+  document.getElementById("pemBody").value = certToPem(r);
+  if (pemDlg.showModal) pemDlg.showModal(); else pemDlg.setAttribute("open","");
+});
+document.getElementById("pemCopy").addEventListener("click", async ()=>{
+  const btn = document.getElementById("pemCopy");
+  const body = document.getElementById("pemBody");
+  let ok = false;
+  try { await navigator.clipboard.writeText(body.value); ok = true; }
+  catch(_){
+    body.select();
+    try { ok = document.execCommand("copy"); } catch(_){ ok = false; }
+    window.getSelection().removeAllRanges();
+  }
+  if (ok){
+    btn.classList.add("done");
+    setTimeout(()=>btn.classList.remove("done"), 1500);
+  }
+});
+document.getElementById("pemClose").addEventListener("click", ()=>{
+  if (pemDlg.close) pemDlg.close(); else pemDlg.removeAttribute("open");
+});
+pemDlg.addEventListener("click", e=>{ if (e.target === pemDlg) pemDlg.close(); });
 
 /* User guide dialog: open from the title bar, close via button, Escape
    (native dialog behavior), or clicking the backdrop. */

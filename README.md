@@ -14,7 +14,7 @@ Usage: Open `Certificate Report Bundle Tool.html` in a modern browser.
 
 **Import.** Reads DER, PEM, headerless Base64, and PKCS#7 bundles. Certificates already in the report are skipped rather than added again.
 
-**Report.** One row per certificate: subject, issuer, validity dates, serial number, key and signature algorithms, SHA-1 thumbprint, OCSP and CRL URLs, and certificate type. Expired certificates are flagged in red. The search box highlights matching rows across all columns, including serials and thumbprints. Checkboxes select specific rows for export.
+**Report.** One row per certificate: subject, issuer, validity dates, serial number, key and signature algorithms, SHA-1 thumbprint, OCSP and CRL URLs, and certificate type. Expired certificates are flagged in red. The search box highlights matching rows across all columns, including serials and thumbprints. Checkboxes select specific rows for export. Clicking a certificate's name opens its PEM in a popup with a Copy button.
 
 **Compare.** Diffs two certificate sets in a report-style table. 
 
