@@ -2252,7 +2252,10 @@ document.getElementById("exportPem").addEventListener("click", async ()=>{
    byte-structurally the same output as `openssl crl2pkcs7 -nocrl`.
    The certificate SET OF is written in name-sorted order, not the
    encoding-sorted order strict DER requires (X.690 11.6), matching
-   crl2pkcs7; every mainstream consumer accepts this BER detail. */
+   crl2pkcs7; every mainstream consumer accepts this BER detail.
+   Byte identity with `openssl crl2pkcs7 -nocrl` for the same
+   certificate order is pinned by test, so any consumer that accepts an
+   openssl bundle accepts this one: the bytes are the same. */
 /** Encode a DER length (short or long form). */
 function derLen(n){
   if (n < 0x80) return [n];
