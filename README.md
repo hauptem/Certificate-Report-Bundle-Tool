@@ -8,6 +8,8 @@ Usage: Open `Certificate Report Bundle Tool.html` in a modern browser.
 
 <img width="2576" height="1070" alt="Image" src="https://github.com/user-attachments/assets/adf71261-95bf-447a-89d0-708b01531536" />
 
+<img width="2576" height="1150" alt="Image" src="https://github.com/user-attachments/assets/a86fdf21-1489-479c-b11d-de2e9b63158e" />
+
 ## Capabilities
 
 **Verify.** This checks a signed release against a manifest file to ensure integrity. The tool verifies the signature on the publisher's hash manifest, validates the signer's certificate chain to a self-signed root, and compares each bundle file's hash against the signed manifest. Chain links are required to be CA certificates (Basic Constraints), so an end-entity certificate cannot be used as an issuer. Results are shown as a table listing each file's status, manifest hash, and computed hash. The root's fingerprint is displayed for comparison against the issuing authority's published value. Attached and detached CMS signatures are supported, with RSA PKCS#1 v1.5, RSA-PSS, and ECDSA (P-256/P-384/P-521). 
