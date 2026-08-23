@@ -12,7 +12,7 @@ The tool never trusts the root certificate, since it came in the same download. 
 
 Use the Import buttons in the results to send a verified file's certificates to the report without dropping it again.
 
-Signature files are recognized by their extension (`.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, `.sig`), and the manifest must be sha256sum, sha384sum, or sha512sum output, or openssl dgst BSD-style lines (SHA256 (name) = hex). Attached and detached signatures both work, with RSA PKCS#1 v1.5, RSA-PSS, or ECDSA on P-256, P-384, or P-521. Co-signed releases are checked against the first signer only, and chain building assumes v3 certificates: an issuer without Basic Constraints is rejected as a non-CA, while issuer keyUsage and extended key usage are not evaluated; the root fingerprint comparison remains the trust decision. 
+Signature files are recognized by their extension (`.sha256`, `.sha384`, `.sha512`, `.p7s`, `.p7m`, `.sig`), and the manifest must be sha256sum, sha384sum, or sha512sum output, or openssl dgst BSD-style lines (SHA256 (name) = hex). Attached and detached signatures both work, with RSA PKCS#1 v1.5, RSA-PSS, or ECDSA on P-256, P-384, or P-521. Co-signed releases are checked against the first signer only, and chain building assumes v3 certificates: an issuer without Basic Constraints is rejected as a non-CA, while issuer keyUsage and extended key usage are not evaluated; the root fingerprint comparison remains the trust decision.
 
 ## Import
 
@@ -22,15 +22,15 @@ Fill in Category, Version, or Release Date before dropping to label everything i
 
 ## Report
 
-Each certificate is a row showing its subject, issuer, validity, serial, algorithms, thumbprint, revocation URLs, and type, with expired and not-yet-valid certificates flagged. Sort by clicking the Certificate Name or Expiration header, and use the search box to highlight matches anywhere in the table; matching rows are also selected, so a search can feed an export directly; clearing the search clears the selection. Check rows to select them for export, or remove them individually with the button at the end of each row. Click a certificate's name to view its PEM in a popup with a Copy button, for pasting into anything that accepts PEM directly.
+Each certificate is a row, with expired and not-yet-valid certificates flagged. Sort by clicking the Certificate Name or Expiration header, and use the search box to highlight matches anywhere in the table; matching rows are also selected, so a search can feed an export directly; clearing the search clears the selection. Check rows to select them for export, or remove them individually with the button at the end of each row. Click a certificate's name to view its PEM in a popup with a Copy button, for pasting into anything that accepts PEM directly.
 
 ## Compare
 
-Compare, in the title bar, diffs two certificate sets. Drop the baseline on the Reference side and the set you're evaluating on the Comparison side; differences appear as a table once both sides have certificates. Matching uses the full subject, so same-named certificates from different organizations aren't confused.
+Compare, in the title bar, diffs two certificate sets. Drop the baseline on the Reference side and the set you're evaluating on the Comparison side; differences appear as a table once both sides have certificates. Matching uses the full subject, so same-named certificates from different organizations aren't confused. A CHANGED row means both sides hold a certificate with the same subject but different bytes: a renewed, rekeyed, or wrong-generation CA.
 
 ## Export
 
-Exports cover the checked rows, or the whole report if nothing is checked, with duplicates removed. Use PEM for an openssl-style CA file, P7B for Windows and Java trust stores, .cer for a single certificate as DER, CSV for a spreadsheet copy of the report with SHA-256 thumbprints added, and HTML for a standalone copy of the report you can share, archive, or print. Before writing a .cer, PEM, or P7B file, the tool re-reads its own output and refuses the export unless every certificate reads back byte-identical to the report.
+Exports cover the checked rows, or the whole report if nothing is checked, with duplicates removed. Use PEM for an openssl-style CA file, P7B for Windows and Java trust stores, .cer for a single certificate as DER, CSV for a spreadsheet copy of the report with SHA-256 thumbprints added, and HTML for a standalone copy of the report. Before writing a .cer, PEM, or P7B file, the tool re-reads its own output and refuses the export unless every certificate reads back byte-identical to the report.
 
 ## Notes
 
