@@ -3,7 +3,7 @@
   =============================================================================
   Certificate Report/Bundle Tool
   =============================================================================
-  Version: v1.3
+  Version: v1.3.1
   Author: Eric Haupt
   Released under the MIT License.
   https://github.com/hauptem/Certificate-Report-Bundle-Tool
@@ -124,13 +124,20 @@
   #compareBtn,#guideBtn,#vclear,#clear,#bClear,#cmpClose,#guideClose,#pemClose,#pemCopy{width:92px;padding-left:0;padding-right:0;text-align:center}
   td.certname{cursor:pointer}
   td.certname:hover{text-decoration:underline;color:#1f5faf}
-  /* PEM dialog width is viewport-relative by design and tuned by eye
-     against a 4096-bit certificate on a large display; on narrower
-     viewports the 64-column body scrolls horizontally, and Copy is
-     unaffected. */
-  dialog#pemview{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.7);padding:0;width:19vw;max-width:none;margin:auto;overflow:hidden}
+  /* The PEM dialog holds one constant size. The body is sized in ch of
+     its own 12px mono font to the 64-column armor b64Wrap emits, plus
+     padding and vertical-scrollbar allowance, and the dialog wraps it
+     with fit-content, so the full PEM is always visible with no
+     horizontal scroll. The 96vw and 86vh guards exist only so the
+     dialog still opens on windows smaller than the content; inside
+     them the size never varies with the viewport. */
+  dialog#pemview{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.7);padding:0;width:fit-content;max-width:96vw;margin:auto;overflow:hidden}
+  /* The title is the source filename and can exceed the header's
+     min-content width; without a break-anywhere rule the non-shrinking
+     button strip slides under the dialog edge. */
+  dialog#pemview .guide-h b{min-width:0;overflow-wrap:anywhere}
   dialog#pemview::backdrop{background:rgba(0,0,0,.82);backdrop-filter:blur(2px)}
-  #pemBody{display:block;width:100%;height:60.5vh;background:#ffffff;color:#111417;border:none;resize:none;padding:16px 20px;font-family:var(--mono);font-size:12px;line-height:1.45;white-space:pre;overflow:auto}
+  #pemBody{display:block;width:calc(64ch + 58px);max-width:96vw;height:min(76em,86vh);background:#ffffff;color:#111417;border:none;resize:none;padding:16px 20px;font-family:var(--mono);font-size:12px;line-height:1.45;white-space:pre;overflow:auto}
   #pemBody:focus{outline:none}
   #pemCopy.done,#bClear.done{background:#2d6642;border-color:#478a63}
   #exportCer,#exportPem,#exportP7b,#export,#exportHtml{width:150px;padding-left:0;padding-right:0;text-align:center}
