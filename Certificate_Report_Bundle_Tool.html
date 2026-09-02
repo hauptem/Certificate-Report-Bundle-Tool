@@ -3,7 +3,7 @@
   =============================================================================
   Certificate Report/Bundle Tool
   =============================================================================
-  Version: v1.3.2
+  Version: v1.3.3
   Author: Eric Haupt
   Released under the MIT License.
   https://github.com/hauptem/Certificate-Report-Bundle-Tool
@@ -23,12 +23,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Certificate Report/Bundle Tool</title>
 <style>
-  /* ------------------------------------------------------------------
-     Design tokens.
-     Surface elevation, dark theme (back to front):
-       --bg (page) < --panel2 (recessed wells) < --panel (section bodies)
-       < header (#2c3849 group) < buttons < primary action.
-     ------------------------------------------------------------------ */
   :root{
     --bg:#07090d; --panel:#222d3d; --panel2:#0d1218; --line:#4a5a74;
     --text:#e8edf4; --dim:#a8b3c2; --accent:#c6d8ef;
@@ -1441,9 +1435,13 @@ async function verifyCMS(cms, pool, pending, cmsName, smimeContent){
       : [...pending];
     outer:
     for (const [name, bytes] of sources){
-      // Binary DER files (leading 0x30) are never S/MIME text; skip
-      // the canonicalized duplicate for them and for LF-free files.
-      const canon = bytes[0] === 0x30 ? bytes : crlf(bytes);
+      // No leading-byte DER sniff here: 0x30 is also ASCII "0", the
+      // first character of one manifest in sixteen (a sha256sum line
+      // opening with a zero hex digit), and skipping canonicalization
+      // for those failed genuine text-mode signatures. crlf returns
+      // the same buffer for LF-free input, so binary files cost at
+      // most one extra digest.
+      const canon = crlf(bytes);
       const candidates = canon === bytes ? [bytes] : [bytes, canon];
       for (const candidate of candidates){
         let match = false;
