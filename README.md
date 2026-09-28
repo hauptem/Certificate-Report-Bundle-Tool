@@ -1,8 +1,8 @@
 # Certificate Report/Bundle Tool
 
-A single HTML file that inspects X.509 certificates, verifies signed bundle releases, exports certificate bundles in various formats, and exports the report as CSV. 
+A single offline HTML file that inspects X.509 certificates, verifies signed bundle releases, exports certificate bundles in various formats, and exports the report as CSV using a browsers web crypto capabilities.
 
-Usage: Open `Certificate_Report_Bundle_Tool.html` in a modern browser. The tool runs entirely offline; no certificate data leaves the machine.
+Usage: Open `Certificate_Report_Bundle_Tool.html` in a modern browser. 
 
 <img width="2048" height="1078" alt="Image" src="https://github.com/user-attachments/assets/7e9d5675-28ba-4258-8dcb-9799bd63c2e7" />
 
